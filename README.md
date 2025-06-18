@@ -6,7 +6,7 @@ Erlic is a multifunctional WhatsApp bot developed using [Baileys](https://github
 
 ## Features
 
-- Auto Update System (GitHub-based)
+- Auto Update System
 - Login Verification with Username & Password
 - Command Handler
 - Group & Private Support
