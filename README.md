@@ -27,6 +27,9 @@ Erlic is a multifunctional WhatsApp bot developed using [Baileys](https://github
 
 ---
 
+## Note 
+If in your container there is a new file with the last name [NEW UPDATE] that means it is a system update or new feature in the Erlic bot. Just rename it by deleting [NEW UPDATE] if you want to try the new features, and don't forget to delete the old file. The console already shows what has been updated, so you can see files ending with [NEW UPDATE].
+
 ## Installation
 
 ```bash
