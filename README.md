@@ -1,6 +1,6 @@
 # Erlic Bot
 
-Erlic is a multifunctional WhatsApp bot developed using [Baileys](https://github.com/adiwajshing/Baileys). Designed for speed, modularity, and ease of customization, Erlic brings automation, moderation, and fun directly into your WhatsApp chats.
+Erlic is a multifunctional WhatsApp bot developed using [Baileys](https://github.com/kiuur/bails). Designed for speed, modularity, and ease of customization, Erlic brings automation, moderation, and fun directly into your WhatsApp chats.
 
 ---
 
