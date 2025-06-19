@@ -152,6 +152,9 @@ async function upload(buffer) {
         return { status: false, message: String(error) };
     }
 }
+  function formatMoney(amount) { 
+    return amount.toLocaleString('id-ID');
+}
 async function resize(media) {
   const image = await read(media);
   const min = Math.min(image.getWidth(), image.getHeight());
