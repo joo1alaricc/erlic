@@ -893,6 +893,12 @@ case 'delsampah': {
   });
 }
 break;
+
+    case'proses':{if(!isCreator)return m.reply(mess.owner);let raw=text||'';if(!raw&&!m.quoted)return m.reply(func.example(cmd, 'Pulsa,5000,628xxxx'));let[product,nominal,target]=raw.split(',').map(v=>v?.trim()),parsed=parseInt((nominal||'').replace(/[^0-9]/g,''),10);if(!product||isNaN(parsed))return m.reply(func.example(cmd, 'Pulsa,5000,628xxxx'));if(!target&&m.quoted)target=m.quoted.sender?.split('@')[0];if(!target)return m.reply('Target tidak ditemukan.');if(target.startsWith('0'))target='62'+target.slice(1);else if(target.startsWith('+'))target=target.replace('+','');let now=new Date(),tanggal=now.toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'}),waktu=now.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'}),teks=`乂 *TRANSACTION ON PROCESS*\n\n- *Product* : _${product}_\n- *Nominal* : _Rp${formatMoney(parsed)}_\n- *Date* : _${tanggal}_\n- *Time* : _${waktu}_ WIB\n- *Status* : On Process 🔄\n\n*PLEASE WAIT PATIENTLY*`;erlic.sendMessage(`${target}@s.whatsapp.net`,{text:teks},{quoted:func.fstatus('System Notification')});erlic.sendMessage(m.chat,{text:'⏳ Status proses telah dikirim!'},{quoted:m})}
+break;
+
+    case'done':{if(!isCreator)return m.reply(mess.owner);let raw=text||'';if(!raw&&!m.quoted)return m.reply(func.example(cmd, 'Pulsa,5000,628xxxx'));let[product,nominal,target]=raw.split(',').map(v=>v?.trim()),parsed=parseInt((nominal||'').replace(/[^0-9]/g,''),10);if(!product||isNaN(parsed))return m.reply(func.example(cmd, 'Pulsa,5000,628xxxx'));if(!target&&m.quoted)target=m.quoted.sender?.split('@')[0];if(!target)return m.reply('Target tidak ditemukan.');if(target.startsWith('0'))target='62'+target.slice(1);else if(target.startsWith('+'))target=target.replace('+','');let now=new Date(),tanggal=now.toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'}),waktu=now.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'}),teks=`乂 *TRANSACTION SUCCESSFULLY*\n\n- *Product* : _${product}_\n- *Nominal* : _Rp${formatMoney(parsed)}_\n- *Date* : _${tanggal}_\n- *Time* : _${waktu}_ WIB\n- *Status* : Success ✅\n\n*THANK YOU FOR ORDERING*`;erlic.sendMessage(`${target}@s.whatsapp.net`,{text:teks},{quoted:func.fstatus('System Notification')});erlic.sendMessage(m.chat,{text:'✅ Transaksi berhasil dikirim!'},{quoted:m})}
+break;
         
 case 'public':
 case 'self': {
