@@ -236,7 +236,9 @@
       "autotyping",
       "autorecord",
       "gconly",
-      "addcase"
+      "addcase",
+      "done",
+      "proses"
     ]
   },
   {
