@@ -1855,6 +1855,8 @@ case 'text2qr': case 'texttoqr': {
   }
 }
 break;
+
+    case'murottal':{if(!text)return m.reply(func.example(cmd,'1'));try{await erlic.sendMessage(m.chat,{react:{text:'⏳',key:m.key}});const{default:axios}=require('axios'),res=await axios.get(`https://api.fasturl.link/religious/murottal?surah=${text}&language=id`),data=res.data;if(data.status!==200||!data.result?.files?.length)return m.reply('Surah tidak ditemukan atau gagal mengambil audio.');const a=data.result.files[0],{url,b:surahNumber,c:surahName,d:verses,e:juz,f:revelationPlace}=a;await erlic.sendMessage(m.chat,{audio:{url:url},mimetype:'audio/mpeg',ptt:false,contextInfo:{externalAdReply:{title:`${a.surahNumber} - ${a.surahName}`,body:`${a.verses} ayat - juz ${a.juz} - ${a.revelationPlace}`,thumbnailUrl:'https://files.catbox.moe/z19xq7.jpeg',sourceUrl:global.link,mediaType:1,renderLargerThumbnail:false,showAdAttribution:false}}},{quoted:m})}catch(err){console.error(err),m.reply(mess.error)}}break;
         
 case 'qr2text': case 'qrtotext': {
   const quoted = m.quoted ? m.quoted : m.msg?.contextInfo?.quotedMessage ? m : null;
