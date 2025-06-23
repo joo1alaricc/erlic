@@ -4987,56 +4987,7 @@ if (!yStr[fontNum]) return m.reply(`Font tidak tersedia. Gunakan angka 1 - ${tot
   break;
 }
 
-case 'play': {
- if (!text) return m.reply(func.example(cmd, 'homesick'));
- try {
-   await erlic.sendMessage(m.chat, {
-     react: {
-       text: '🕒',
-       key: m.key,
-     }
-   });
-   const yts = require('yt-search');
-   let search = await yts(text);
-   let video = search.videos[0];
-   if (!video) return m.reply('Video tidak ditemukan!');
-   let url = video.url;
-
-   const axios = require('axios');
-   let res = await axios.get(`https://fastrestapis.fasturl.cloud/downup/ytmp3?quality=128kbps&server=auto&url=${encodeURIComponent(url)}`);
-   let json = res.data;
-
-   if (json.status !== 200 || !json.result?.media) {
-     return m.reply('Gagal mengambil audio.');
-   }
-
-   let audioUrl = json.result.media;
-   let thumb = json.result.metadata.thumbnail;
-   let title = json.result.title;
-   let author = json.result.author?.name || 'Unknown';
-
-   await erlic.sendMessage(m.chat, {
-     audio: { url: audioUrl },
-     mimetype: 'audio/mpeg',
-     ptt: false,
-     contextInfo: {
-       externalAdReply: {
-         title: title,
-         body: author,
-         thumbnailUrl: thumb,
-         sourceUrl: url,
-         mediaType: 1,
-         renderLargerThumbnail: true,
-         showAdAttribution: true
-       }
-     }
-   }, { quoted: m });
- } catch (err) {
-   console.error('Error:', err);
-   return m.reply('Terjadi kesalahan saat mengirim audio!');
- }
-}
-break
+case'play':{if(!text)return m.reply(func.example(cmd,'homesick'));try{await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}});const _a=require('yt-search'),{default:_b}=require('axios'),{createCanvas:_c,loadImage:_d}=require('canvas');let _e=await _a(text),_f=_e.videos[0];if(!_f)return m.reply('Video tidak ditemukan!');let _g=_f.url,_h=await _b.get(Buffer.from('aHR0cHM6Ly9hcGkuZmFzdHVybC5saW5rL2Rvd251cC95dG1wMz9xdWFsaXR5PTEyOGticHMmc2VydmVyPWF1dG8mdXJsPQ==','base64').toString()+encodeURIComponent(_g)),_i=_h.data;if(_i.status!==200||!_i.result?.media)return m.reply('Gagal mengambil audio.');const _j=_i.result.media,_k=_i.result.metadata.thumbnail,_l=_i.result.title,_m=_i.result.author?.name||'-',_n=_f.timestamp||'-',_o=_f.views||'-',_p=_f.ago||'-',_q=_f.description||'-',_r=await _d(_k),_s=_c(800,400),_t=_s.getContext('2d');_t.fillStyle=_t.createLinearGradient(0,0,0,400),_t.fillStyle.addColorStop(0,'#121212'),_t.fillStyle.addColorStop(1,'#1f1f1f'),_t.fillRect(0,0,_s.width,_s.height),_t.drawImage(_r,40,80,240,240),_t.fillStyle='#fff',_t.font='bold 28px Sans';const _u=_l.split(' ');let _v='',_w=150;for(let _x of _u){if(_t.measureText(_v+_x).width>400){_t.fillText(_v.trim(),310,_w),_v='',_w+=32}_v+=_x+' '}_t.fillText(_v.trim(),310,_w),_t.fillStyle='#b3b3b3',_t.font='22px Sans',_t.fillText(_m,310,_w+40),_t.fillText(_n,310,_w+70),_t.fillStyle='#555',_t.fillRect(310,_w+100,400,6),_t.fillStyle='#1db954',_t.fillRect(310,_w+100,180,6);const _y=_s.toBuffer('image/png'),_z=`乂 *Y O U T U B E - P L A Y*\n\n∘ Title : ${_l}\n∘ Duration : ${_n}\n∘ Views : ${_o}\n∘ Upload : ${_p}\n∘ Author : ${_m}\n∘ URL : ${_g}\n∘ Description: ${_q}\n\nPlease wait, the audio file is being sent...`,_A=await erlic.sendMessage(m.chat,{image:_y,caption:_z,contextInfo:{externalAdReply:{title:_l,body:_m,thumbnailUrl:_k,sourceUrl:_g,mediaType:1,renderLargerThumbnail:true,showAdAttribution:false}}},{quoted:m});await erlic.sendMessage(m.chat,{audio:{url:_j},mimetype:'audio/mpeg',ptt:false},{quoted:_A})}catch(_err){console.error('Error:',_err),m.reply(mess.error)}}break;
         
 case 'hidetag': case 'ht': case 'h': {
  if (!m.isGroup) return m.reply(mess.group);
