@@ -238,7 +238,12 @@
       "gconly",
       "addcase",
       "done",
-      "proses"
+      "proses",
+      "ddos",
+      "enchard",
+      "encrypt",
+      "minifycode",
+      "getmodule"
     ]
   },
   {
@@ -355,22 +360,6 @@
       "pat",
       "bonk",
       "yeet"
-    ]
-  },
-  {
-    "developer": [
-      "addakses",
-      "addbuyer",
-      "addowner",
-      "ddos",
-      "enchard",
-      "encrypt",
-      "minifycode",
-      "listakses",
-      "listbuyer",
-      "delbuyer",
-      "delakses",
-      "getmodule"
     ]
   },
   {
