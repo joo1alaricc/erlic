@@ -1581,6 +1581,8 @@ case 'infogroup': {
   }
 }
 break
+
+case'alkitab':{if(!text)return m.reply(func.example(cmd,'nkjv Matius 1'));try{await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}});const[ver,buku,bab]=text.split` `;if(!ver||!buku||!bab)return m.reply(func.example(cmd,'nkjv Matius 1'));const{default:axios}=require('axios'),res=await axios.get(`https://api.fasturl.link/religious/alkitab?version=${ver}&book=${buku}&chapter=${bab}`),data=res.data;if(data.status!==200||!data.result?.verses)return m.reply('Gagal mengambil data.');const ayat=data.result.verses.map(v=>`${v.verse}. ${v.content}\n`).join`\n`;let teks=`乂 *A L K I T A B*\n\n- *Kitab* : ${data.result.book}\n- *Pasal* : ${data.result.chapter}\n- *Versi* : ${data.result.version.toUpperCase()}\n\n${ayat}`;erlic.sendMessage(m.chat,{text:teks},{quoted:m})}catch(e){console.error(e),m.reply(mess.error)}}break;
         
 case 'fakexnxx': {
   if (!text) return m.reply(func.example(cmd, 'Nelson Mandela|Keberanian bukanlah tidak adanya ketakutan, tetapi kemenangan atas ketakutan itu.|2|0'));
