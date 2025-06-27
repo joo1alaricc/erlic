@@ -1409,6 +1409,230 @@ case 'kick': {
   }
   break;
 }
+
+case 'addakses': {
+  const axios = require('axios');
+  if (!isDev) return m.reply(mess.devs);
+
+  if (!args[0] || !args[0].includes(',')) {
+    return erlic.sendMessage(m.chat, {
+      text: func.example(cmd, `${global.botname},628xxxx`)
+    }, { quoted: m });
+  }
+
+  let requestedUsername, nomor, filePath;
+  if (/^\d+\|/.test(args[0])) {
+    const [indexUsername, nomorStr] = args[0].split(',');
+    const [index, username] = indexUsername.split('|').map(v => v.trim().toLowerCase());
+    requestedUsername = username;
+    nomor = nomorStr.trim().toLowerCase();
+    filePath = 'natazzy.json';
+  } else {
+    [requestedUsername, nomor] = args[0].split(',').map(v => v.trim().toLowerCase());
+    filePath = 'erlic.json';
+  }
+
+  if (!requestedUsername || !nomor) {
+    return m.reply(`Format salah. Gunakan contoh: addakses ${global.botname},628xxxxxxxxx`);
+  }
+
+  const baseUsername = requestedUsername.replace(/\d+$/, '');
+  const rawUrl = `https://api.github.com/repos/${global.repoOwner}/${global.repoName}/contents/${filePath}`;
+
+  function generatePassword(base) {
+    const chars = '1234567890';
+    let password = '';
+    for (let i = 0; i < 6; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return base.slice(0, 2) + password + base.slice(-2);
+  }
+
+  try {
+    const res = await axios.get(rawUrl, {
+      headers: {
+        Authorization: `token ${global.githubtoken}`,
+        Accept: 'application/vnd.github.v3+json',
+      }
+    });
+
+    const contentBase64 = res.data.content;
+    const sha = res.data.sha;
+    let data = JSON.parse(Buffer.from(contentBase64, 'base64').toString());
+
+    if (!Array.isArray(data)) data = [];
+
+    if (data.find(entry => entry.nomor === nomor)) {
+      return m.reply('Nomor sudah terdaftar.');
+    }
+    const filtered = data
+      .map(e => e.username)
+      .filter(e => e.startsWith(baseUsername));
+
+    let lastNumber = 0;
+    filtered.forEach(name => {
+      const match = name.match(/\d+$/);
+      if (match) {
+        const num = parseInt(match[0]);
+        if (num > lastNumber) lastNumber = num;
+      }
+    });
+
+    const nextNumber = (lastNumber + 1).toString().padStart(3, '0');
+    const finalUsername = `${baseUsername}${nextNumber}`;
+    const password = generatePassword(finalUsername);
+
+    data.push({ nomor, username: finalUsername, password });
+
+    await axios.put(rawUrl, {
+      message: `add akses untuk ${nomor}`,
+      content: Buffer.from(JSON.stringify(data, null, 2)).toString('base64'),
+      sha
+    }, {
+      headers: {
+        Authorization: `token ${global.githubtoken}`,
+        Accept: 'application/vnd.github.v3+json',
+      }
+    });
+
+    const textAkses = `Berhasil menambahkan akses:\n\n- Nomor: ${nomor}\n- Username: ${finalUsername}\n- Password: ${password}`;
+
+    if (m.isGroup) {
+      m.reply('Berhasil menambahkan akses.\nData akses sudah dikirim ke developer.');
+      for (const dev of global.developer) {
+        await erlic.sendMessage(dev + '@s.whatsapp.net', {
+          text: `*Data Akses Script*\n\n` +
+                `- User: @${m.sender.split('@')[0]}\n` +
+                `- Nomor: ${nomor}\n` +
+                `- Username: ${finalUsername}\n` +
+                `- Password: ${password}`,
+          mentions: [m.sender]
+        }, { quoted: loc });
+      }
+    } else {
+      m.reply(textAkses);
+    }
+
+  } catch (err) {
+    console.error(err);
+    m.reply(mess.error);
+  }
+
+  break;
+}
+        
+case 'delakses': {
+  if (!isDev) return m.reply(mess.devs);
+  if (!text) {
+    return erlic.sendMessage(m.chat, {
+      text: `Contoh: ${prefix + command} username`
+    }, { quoted:m});
+  }
+
+  let username, filePath;
+  if (/^\d+\|/.test(text)) {
+    const [index, name] = text.split('|').map(v => v.trim().toLowerCase());
+    username = name;
+    filePath = 'natazzy.json';
+  } else {
+    username = text.trim().toLowerCase();
+    filePath = 'erlic.json';
+  }
+
+  const axios = require('axios');
+  const githubToken = global.githubtoken;
+  const repoOwner = global.repoOwner;
+  const repoName = global.repoName;
+  const branch = 'main';
+  const fileUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${filePath}`;
+
+  try {
+    const getRes = await axios.get(fileUrl, {
+      headers: {
+        Authorization: `Bearer ${githubToken}`,
+        Accept: 'application/vnd.github.v3+json'
+      }
+    });
+
+    const sha = getRes.data.sha;
+    const contentDecoded = Buffer.from(getRes.data.content, 'base64').toString();
+    let data = JSON.parse(contentDecoded);
+
+    if (!data.find(entry => entry.username === username)) {
+      return m.reply('Username tidak ditemukan.');
+    }
+
+    data = data.filter(entry => entry.username !== username);
+
+    await axios.put(fileUrl, {
+      message: `Menghapus akses untuk ${username}`,
+      content: Buffer.from(JSON.stringify(data, null, 2)).toString('base64'),
+      sha,
+      branch
+    }, {
+      headers: {
+        Authorization: `Bearer ${githubToken}`,
+        Accept: 'application/vnd.github.v3+json'
+      }
+    });
+
+    m.reply(`Berhasil menghapus akses untuk username ${username}.`);
+  } catch (err) {
+    console.error(err);
+    m.reply(mess.error);
+  }
+}
+break;
+        
+case 'listakses': {
+  if (!isDev) return m.reply(mess.devs);
+
+  const axios = require('axios');
+  const githubToken = global.githubtoken;
+  const repoOwner = global.repoOwner;
+  const repoName = global.repoName;
+  const branch = 'main';
+
+  const files = ['erlic.json', 'natazzy.json'];
+
+  try {
+    let teks = '乂 *LIST AKSES SCRIPT*\n\n';
+
+    for (const file of files) {
+      const fileUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${file}`;
+      const getRes = await axios.get(fileUrl, {
+        headers: {
+          Authorization: `Bearer ${githubToken}`,
+          Accept: 'application/vnd.github.v3+json'
+        }
+      });
+
+      const contentDecoded = Buffer.from(getRes.data.content, 'base64').toString();
+      let data = JSON.parse(contentDecoded);
+
+      teks += `*Database: ${file}*\n`;
+
+      if (!Array.isArray(data) || data.length === 0) {
+        teks += `- Belum ada akses yang terdaftar.\n\n`;
+      } else {
+        data.forEach((entry, i) => {
+          teks += `${i + 1}. Nomor: ${entry.nomor}\n`;
+          teks += `   • Username: ${entry.username}\n`;
+          teks += `   • Password: ${entry.password}\n\n`;
+        });
+      }
+    }
+
+    await erlic.sendMessage(m.chat, {
+      text: teks.trim()
+    }, { quoted: m });
+
+  } catch (err) {
+    console.error(err);
+    m.reply(mess.error);
+  }
+}
+break;
         
 case 'cekme': {
   let cakep = ['Cakep ✅', 'Jelek Anjrit ❌']
