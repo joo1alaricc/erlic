@@ -57,6 +57,7 @@ const isCmd = isCreato ? (matchedPrefix || !prefixRegx.test(bud)) : bud.startsWi
   }
 }
 try {
+const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { read } = require('jimp');
 const { MIME_JPEG } = require('jimp');
 const { styles, yStr } = require('./system/font.js');
@@ -326,6 +327,21 @@ text: text
 }
 });
     
+func.fdoc = (text = '') => ({
+  key: {
+    participant: '0@s.whatsapp.net',
+    ...(m.chat ? { remoteJid: 'status@broadcast' } : {})
+  },
+  message: {
+    documentMessage: {
+      title: text,
+      fileName: 'file.pdf',
+      mimetype: 'application/pdf',
+      jpegThumbnail: Buffer.alloc(0)
+    }
+  }
+});
+    
 func.formatNumber = (integer) => {
     let numb = parseInt(integer)
     return Number(numb).toLocaleString().replace(/,/g, '.')
@@ -413,6 +429,8 @@ func.fetchJson = async (url, options = {}) => {
         return err
     }
 }
+
+func.fdoc = {key : {participant : '0@s.whatsapp.net', ...(m.chat ? { remoteJid: `status@broadcast` } : {}) },message: {documentMessage: {title: global.wm, jpegThumbnail: ""}}}
 
 func.isUrl = (url) => {
     return url.match(new RegExp(/https?:\/\/(www\.)?[-a-zA-Z0-9@:%.+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%+.~#?&/=]*)/, 'gi'))
@@ -574,7 +592,7 @@ function isBanned(id) {
   return Date.now() < user.until;
 }
 
-if (!isCreator && isBanned(m.sender) && !['owner'].includes(command)) {
+if (!isCreator && isBanned(m.sender) && !['owner'].includes(command) && isCmd) {
   const banned = JSON.parse(fs.readFileSync('./database/banned.json'));
   const user = banned.find(u => u.id === m.sender);
   let untilText = 'UNKNOWN';
@@ -724,12 +742,15 @@ showAdAttribution: false
 }
 }, { quoted: func.fstatus('System Notification') })
 }
+    
+async function autoBackup(erlic,m){setInterval(async()=>{const fs=require("fs"),{execSync}=require("child_process"),path="./database/lastBackup.json";const now=new Date(),hourStamp=now.toISOString().slice(0,13);let last=fs.existsSync(path)?JSON.parse(fs.readFileSync(path)).hourStamp:null;if(hourStamp===last)return;fs.writeFileSync(path,JSON.stringify({hourStamp}));const ls=(execSync("ls")).toString().split("\n").filter(pe=>!["node_modules","session","tmp","package-lock.json",""].includes(pe));const zipName=`backup_${hourStamp.replace(/:/g,"-")}.zip`;execSync(`zip -r ${zipName} ${ls.join(" ")}`);const size=fs.statSync(`./${zipName}`).size,sizeFormatted=size<1024*1024?`${(size/1024).toFixed(2)} KB`:`${(size/(1024*1024)).toFixed(2)} MB`;const combined=[...(global.owner||[])],uniqueJids=[...new Set(combined.map(num=>num.replace(/\D/g,"")+"@s.whatsapp.net"))];for(let jid of uniqueJids)await erlic.sendMessage(jid,{document:fs.readFileSync(`./${zipName}`),caption:`Berikut adalah file backup kode bot ${global.botname}.\nSize: ${sizeFormatted}`,mimetype:"application/zip",fileName:zipName},{quoted:func.fstatus('Backup Automatically')});execSync(`rm -rf ${zipName}`);},2*60*60*1000);}
+await autoBackup(erlic,m)
    
 function checkCommandTypo(command, budy, m, pripek) { try { const fs = require('fs'), path = require('path'), similarity = require('similarity'); let menuCommands = []; try { const menuData = JSON.parse(fs.readFileSync(path.join(__dirname, './database/menu.json'))); menuCommands = Object.values(menuData).flatMap(obj => Object.values(obj).flat()).map(cmd => cmd.toLowerCase()); } catch (e) { console.warn(e); } let erlicCases = []; try { const erlicPath = path.join(__dirname, 'erlic.js'), content = fs.readFileSync(erlicPath, 'utf-8'), caseRegex = /case\s+['"`](.+?)['"`]\s*:/g; let match; while ((match = caseRegex.exec(content)) !== null) erlicCases.push(match[1].toLowerCase()); } catch (e) { console.warn(e); } const help = [...new Set([...menuCommands, ...erlicCases])]; if (help.includes(command) || /^\$|>|\bx\b/i.test(budy)) return; const ranked = help.map(cmd => ({ cmd, sim: similarity(command, cmd) })).filter(v => v.sim >= 0.5 && v.sim <= 0.9).sort((a, b) => b.sim - a.sim); const typedPrefix = budy.slice(0, 1); if (ranked.length && /^[^a-zA-Z0-9]/.test(budy) && !m.fromMe && !isBot && !ranked.some(item => item.cmd === command.toLowerCase())) m.reply(`Command tidak ditemukan, mungkin maksud kamu:\n\n${ranked.map(v => `➠ *${pripek}${v.cmd}* (${(v.sim * 100).toFixed(1)}%)`).join('\n')}`); } catch (e) { console.error(e); } }
 checkCommandTypo(command, budy, m, pripek);
 
 switch(command) {
-case `${global.botname}`: case "help": case "menu": {
+case `${global.botname}`: case "menu": {
   await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
   const { performance } = require('perf_hooks');
   let timestamp = performance.now();
@@ -780,7 +801,7 @@ const header = `Hallo ${pushname} 👋🏻\nSaya adalah sistem otomatis berbasis
     const formatted = formatCommands(cmds);
     replyText = `乂  *${formatCategory(selectedCategory)}*\n\n${formatted}`;
   } else {
-    m.reply(`Kategori *${selectedCategory}* tidak ditemukan.`);
+   return m.reply(`Kategori *${selectedCategory}* tidak ditemukan.`);
   }
   const styledText = styles(replyText, global.font);
   let masthan = await erlic.sendMessage(m.chat, {
@@ -820,6 +841,61 @@ if (selectedCategory === 'all') {
 }
 }
 break
+        
+case 'upsc': {
+  if (!isDev) return m.reply(mess.devs);
+  const filePath = 'erlic.js';
+  const rawUrl = `https://api.github.com/repos/joo1alaricc/erlic/contents/${filePath}`;
+
+  if (!m.quoted || !m.quoted.message || !m.quoted.message.documentMessage) {
+    return m.reply('Reply file .js yang mau diupload!');
+  }
+
+  const mime = m.quoted.message.documentMessage.mimetype || '';
+  if (!mime.includes('javascript')) return m.reply('File bukan .js!');
+
+  try {
+    // Ambil file lama dulu
+    const res = await axios.get(rawUrl, {
+      headers: {
+        Authorization: `token ${global.githubtoken}`,
+        Accept: 'application/vnd.github.v3+json',
+      }
+    });
+
+    const oldFileContent = Buffer.from(res.data.content, 'base64');
+    const sha = res.data.sha;
+
+    // Kirim backup ke m.sender
+    await erlic.sendMessage(m.sender, {
+      document: oldFileContent,
+      mimetype: 'application/javascript',
+      fileName: 'backup-erlic.js',
+      caption: '📦 Ini backup `erlic.js` sebelum update.'
+    });
+
+    // Ambil file baru dari reply
+    const buffer = await downloadMediaMessage(m.quoted, 'buffer', {}, {});
+
+    // Upload file baru ke GitHub
+    await axios.put(rawUrl, {
+      message: `Update file erlic.js oleh ${m.sender}`,
+      content: buffer.toString('base64'),
+      sha
+    }, {
+      headers: {
+        Authorization: `token ${global.githubtoken}`,
+        Accept: 'application/vnd.github.v3+json',
+      }
+    });
+
+    m.reply('✅ File `erlic.js` berhasil diperbarui dan backup sudah dikirim!');
+  } catch (e) {
+    console.error(e);
+    m.reply(mess.error);
+  }
+  break;
+}
         
 case 'sampah': {
   if (!isCreator) return m.reply(mess.owner);
@@ -2343,10 +2419,7 @@ case 'cekkontol':{let dedi=['Besar dan berurat','Kecil','Besar','Pendek','Besar 
  case 'cekmemek':{let siti=['Tembem','Longgar','Sempit','Berbulu lebat'];let teksInput=text||'';if(!teksInput&&!m.quoted)return erlic.sendMessage(m.chat,{text:`Gunakan dengan cara ${pripek+command} @tag atau reply pesan\n\nContoh: ${pripek+command} @${m.sender.split('@')[0]}`,contextInfo:{mentionedJid:[m.sender]}},{quoted:m,ephemeralExpiration:m.expiration});if(!teksInput&&m.quoted)teksInput=(m.quoted.text||m.quoted.caption||'').trim();let mentionedJid=m.mentionedJid||(m.quoted?[m.quoted.sender]:[]);let tagTarget=mentionedJid[0]|| (m.quoted? m.quoted.sender : m.sender);let textLower=teksInput.toLowerCase();let isOwnerTagged=mentionedJid.some(jid=>global.owner.includes(jid.replace('@s.whatsapp.net','')))||(m.quoted&&global.owner.includes(m.quoted.sender.replace('@s.whatsapp.net','')))||global.ownername.some(name=>textLower.includes(name.toLowerCase()));if(isOwnerTagged)return erlic.sendMessage(m.chat,{text:`Ownerku cowok! Gak punya memek.`,contextInfo:{mentionedJid}},{quoted:m,ephemeralExpiration:m.expiration});erlic.sendMessage(m.chat,{text:`Memek @${tagTarget.replace('@s.whatsapp.net','')} adalah *${siti[Math.floor(Math.random()*siti.length)]}*`,contextInfo:{mentionedJid:[m.sender,tagTarget] }},{quoted:m,ephemeralExpiration:m.expiration})}break;
         
 case 'cekganteng':case 'cekcantik':case 'ceksange':case 'cekgay':case 'ceklesbi':case 'cekjahat':case 'cekbaik':case 'cekhot':{if(!text&&!m.quoted)return erlic.sendMessage(m.chat,{text:`Gunakan dengan cara ${pripek+command} @tag atau reply pesan\n\nContoh: ${pripek+command} @${m.sender.split('@')[0]}`,contextInfo:{mentionedJid:[m.sender]}},{quoted:m,ephemeralExpiration:m.expiration});let target=text||(m.quoted?(m.quoted.text||m.quoted.caption||''):'');let mentionedJid=m.mentionedJid||(m.quoted?[m.quoted.sender]:[]);let who=(mentionedJid.length>0?mentionedJid[0]:m.quoted?m.quoted.sender:m.sender);let sange=Math.floor(Math.random()*100);let tipe=command.replace(/^cek/i,'');erlic.sendMessage(m.chat,{text:`Nama: @${who.split('@')[0]}\nJawaban: *${sange}%* ${tipe}`,contextInfo:{mentionedJid:[m.sender,who]}},{quoted:m,ephemeralExpiration:m.expiration})}break;
-        
-case 'cekcuaca': case 'cuaca': case 'cca': { 
-if (!text) return m.reply(func.example(cmd, 'bandung')); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); try { const axios = require('axios'); const { data } = await axios.get(`https://api.diioffc.web.id/api/tools/cekcuaca?query=${encodeURIComponent(text)}`); if (!data.status || !data.result) return m.reply('Tidak ditemukan.'); const response = data; const txt = `乂 *C E K - C U A C A*\n\n- Nama Kota/Desa: ${response.result.name}\n- Zona Waktu: ${response.result.timezone || '-'}\n- Description: ${response.result?.weather[0]?.description || '-'}\n- Suhu: ${response.result.main?.temp || '-'}°C\n- Suhu Minus: ${response.result.main?.temp_min || '-'}°C\n- Suhu Maks: ${response.result.main?.temp_max || '-'}°C\n- Tekanan: ${response.result.main?.pressure || '-'} hPa\n- Kelembapan: ${response.result.main?.humidity || '-'}%\n- Kecepatan Angin: ${response.result.wind?.speed || '-'} m/s`; m.reply(txt.trim()); } catch (err) { console.error(err); m.reply(mess.error); } } break;
-        
+            
 case 'carbonify': {
   if (!text) return m.reply(func.example(cmd, `const ${global.botname}`));
   try {
@@ -2884,30 +2957,43 @@ case 'delowner': {
 break
 
 case 'listowner': {
-    if (!isCreator) return m.reply(mess.owner)
-    let list = []
-    let count = 1
-    for (let dev of global.developer) {
-        list.push(`${count++}. @${dev.replace(/\D/g, '')} (Developer)`)
+  if (!isCreator) return m.reply(mess.owner)
+  
+  let list = []
+  let mentioned = []
+  let count = 1
+
+  for (let dev of global.developer) {
+    let jid = dev.includes('@') ? dev : dev + '@s.whatsapp.net'
+    list.push(`${count++}. @${jid.split('@')[0]} (Dev)`)
+    mentioned.push(jid)
+  }
+
+  for (let own of global.owner) {
+    if (!global.developer.includes(own)) {
+      let jid = own.includes('@') ? own : own + '@s.whatsapp.net'
+      list.push(`${count++}. @${jid.split('@')[0]}`)
+      mentioned.push(jid)
     }
-    for (let own of global.owner) {
-        if (!global.developer.includes(own)) {
-            list.push(`${count++}. @${own.replace(/\D/g, '')}`)
-        }
+  }
+
+  for (let prem of global.prems) {
+    if (![...global.developer, ...global.owner].includes(prem)) {
+      let jid = prem.includes('@') ? prem : prem + '@s.whatsapp.net'
+      list.push(`${count++}. @${jid.split('@')[0]}`)
+      mentioned.push(jid)
     }
-    for (let prem of global.prems) {
-        if (![...global.developer, ...global.owner].includes(prem)) {
-            list.push(`${count++}. @${prem.replace(/\D/g, '')}`)
-        }
+  }
+
+  if (list.length === 0) return m.reply('Belum ada owner.')
+
+  let teks = `乂  *LIST OWNER*\n\n` + list.join('\n')
+  await erlic.sendMessage(m.chat, {
+    text: teks,
+    contextInfo: {
+      mentionedJid: [...new Set(mentioned)]
     }
-    if (list.length === 0) return m.reply('Belum ada owner.')
-    let teks = `乂  *LIST OWNER*\n\n` + list.join('\n')
-    erlic.sendMessage(m.chat, {
-        text: teks,
-        contextInfo: {
-            mentionedJid: [...new Set([...global.developer, ...global.owner, ...global.prems])]
-        }
-    }, { quoted: m })
+  }, { quoted: m })
 }
 break
         
@@ -3839,17 +3925,10 @@ case 'cekidch': {
   if (!text.includes('https://whatsapp.com/channel/')) {
     return m.reply(func.example(cmd, 'https://whatsapp.com/channel/xxxxxx'));
   }
-
-  try {
     let result = text.split('https://whatsapp.com/channel/')[1].trim();
     let res = await erlic.newsletterMetadata("invite", result);
-
     let teks = `- *Jid:* ${res.id}\n- *Name:* ${res.name}`.trim();
     return m.reply(teks);
-  } catch (e) {
-    console.error(e);
-    return m.reply(mess.error);
-  }
 }
 break;
         
@@ -4304,8 +4383,8 @@ case 'addfitur': {
     });
     fs.writeFileSync(dbPath, JSON.stringify(menuData, null, 2));
     let pesan = '';
-    if (fiturBaru.length) pesan += `Berhasil menambahkan fitur:\n• ${kategori} (${fiturBaru.join(', ')})\n\n`;
-    if (fiturSudahAda.length) pesan += `Fitur berikut sudah ada di kategori ini:\n• ${kategori} (${fiturSudahAda.join(', ')})\n\n`;
+    if (fiturBaru.length) pesan += `Berhasil menambahkan fitur:\n• ${fiturBaru.join(', ')} (${kategori})\n\n`;
+    if (fiturSudahAda.length) pesan += `Fitur berikut sudah ada di kategori ini:\n• ${fiturSudahAda.join(', ')} (${kategori})\n\n`;
     if (Object.keys(fiturDiKategoriLain).length) {
       pesan += `Fitur berikut sudah ada di kategori lain:\n`;
       for (const [cat, fiturs] of Object.entries(fiturDiKategoriLain)) {
@@ -4392,6 +4471,53 @@ case 'listfitur': case 'totalfitur': {
 }
 break   
         
+case 'gempa': {
+await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+const { data } = await axios.get('https://api.fasturl.link/search/bmkgearthquake?type=auto')
+if (!data || data.status !== 200 || !data.result || !data.result.Infogempa) return m.reply(mess.error)
+
+const g = data.result.Infogempa.gempa
+const caption = `乂 *GEMPA INFO*\n\n` +
+`- *Tanggal:* ${g.Tanggal}\n` +
+`- *Waktu:* ${g.Jam}\n` +
+`- *Magnitudo:* ${g.Magnitude}\n` +
+`- *Kedalaman:* ${g.Kedalaman}\n` +
+`- *Lokasi:* ${g.Wilayah}\n` +
+`- *Koordinat:* ${g.Coordinates} (${g.Lintang}, ${g.Bujur})\n` +
+`- *Potensi:* ${g.Potensi}\n` +
+`- *Dirasakan:* ${g.Dirasakan || '-'}\n`
+
+if (g.Shakemap) {
+  await erlic.sendMessage(m.chat, {
+    image: { url: g.Shakemap },
+    caption
+  }, { quoted: m })
+} else {
+  await erlic.sendMessage(m.chat, { text: caption }, { quoted: m })
+}
+}
+break
+        
+ case 'emojimix': {
+if (!text.includes('+')) return m.reply(func.example(cmd, '😜+😭'))
+const [emoji1, emoji2] = text.split('+').map(v => v.trim())
+if (!emoji1 || !emoji2) return m.reply('Format emoji tidak valid. Gunakan contoh: 😜+😭')
+await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+const res = await axios.get(`https://api.fasturl.link/maker/emojimix?emoji1=${encodeURIComponent(emoji1)}&emoji2=${encodeURIComponent(emoji2)}`, { responseType: 'arraybuffer' })
+const stickerPack = applyWatermarkVars(global.packname, m.pushName || 'Sticker by erlic')
+const stickerAuthor = applyWatermarkVars(global.author, m.pushName || '')
+const stickerImage = new Sticker(res.data, {
+pack: stickerPack,
+author: stickerAuthor,
+id: 'https://instagram.com/arxhillie',
+type: StickerTypes.FULL,
+quality: 100
+})
+const buffer = await stickerImage.toBuffer()
+await erlic.sendMessage(m.chat, { sticker: buffer }, { quoted: m })
+}
+break
+        
 case 'cekprovider': { if (!isCreator) return m.reply(mess.owner); if (!text) return m.reply(func.example(cmd, '0838xxxx')); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); var response = await fetch(`http://apilayer.net/api/validate?access_key=4a1ede76e87d9e64682b284e8620ad68&number=+${text}&country_code=ID&format=1`); var result = await response.json(); m.reply(JSON.stringify(result, null, 2)); } break;
         
 case 'lookup': { if (!text) return m.reply(func.example(cmd, 'botcahx.live.com')); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const fetch = require('node-fetch'); async function lookup(url) { let anu; try { anu = await fetch(`https://api.api-ninjas.com/v1/dnslookup?domain=${url}`, {headers: {'X-Api-Key': 'E4/gdcfciJHSQdy4+9+Ryw==JHciNFemGqOVIbyv'}, contentType: 'application/json'}).then(v => v.text()); return JSON.stringify(JSON.parse(anu), null, 4); } catch (e) { console.log(e); anu = await fetch(`https://api.hackertarget.com/dnslookup/?q=${url}`).then(v => v.text()); return anu; } } let anu = await lookup(text.replace(/^https?:\/\//, '')); m.reply(`*Hasil Dns Lookup ${text} :*\n\n${anu}`); } break;
@@ -4458,6 +4584,67 @@ if (!prompt) return m.reply('Prompt tidak boleh kosong.')
 await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
 const { data } = await axios.get(`https://api.fasturl.link/exoml/aiimage?prompt=${encodeURIComponent(prompt)}&model=flux.1-pro`, { responseType: 'arraybuffer' })
 await erlic.sendMessage(m.chat, { image: Buffer.from(data), caption: mess.ok }, { quoted: m })
+}
+break
+        
+case 'voicetotext':
+case 'vtt':
+case 'audiototext': {
+const quoted = m.quoted ? m.quoted : m
+const mime = (quoted.msg || quoted).mimetype || ''
+if (!quoted || !mime || !/audio|video/.test(mime)) return m.reply(`Balas audio/voice note dengan caption *${pripek + command}*`)
+await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+const media = await quoted.download?.()
+const FormData = require('form-data')
+const form = new FormData()
+let ext = mime.split('/')[1] || ''
+if (ext) ext = `.${ext}`
+form.append('reqtype', 'fileupload')
+form.append('fileToUpload', media, `voice${ext}`)
+const upload = await axios.post('https://catbox.moe/user/api.php', form, { headers: form.getHeaders() })
+const audioUrl = upload.data.trim()
+const { data } = await axios.get(`https://api.fasturl.link/aiexperience/voicetotext?audioUrl=${encodeURIComponent(audioUrl)}`)
+if (!data || data.status !== 200 || !data.result) return m.reply(mess.error)
+await erlic.sendMessage(m.chat, { text: `*Transcription results:*\n${data.result}` }, { quoted: m })
+}
+break
+        
+case 'youtubepoint':
+case 'ytpoint': {
+  if (!text) return m.reply(func.example(cmd, 'https://www.youtube.com/watch?v=JPSQVRJuDTs'))
+  if (!/youtube\.com|youtu\.be/.test(text)) return m.reply(mess.errorUrl)
+
+  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+
+  const axios = require('axios')
+  const url = `https://api.fasturl.link/aiexperience/ytpoint?url=${encodeURIComponent(text)}`
+  const { data } = await axios.get(url)
+
+  if (!data || data.status !== 200 || !data.result) return m.reply(mess.error)
+
+  const r = data.result
+  const meta = r.metadata || {}
+  const dur = (meta.duration || '').split(':').map(Number)
+  const durSec = dur.length === 3 ? dur[0]*3600 + dur[1]*60 + dur[2] : dur[0]*60 + dur[1]
+  if (durSec > 420) return m.reply('Durasi video terlalu panjang. Maksimal hanya 7 menit.')
+
+  const caption =
+`乂 *YOUTUBE AI SUMMARIZER*\n
+- *Judul:* ${r.title}
+- *Channel:* ${meta.channelName || '-'}
+- *Durasi:* ${meta.duration || '-'}
+- *Views:* ${meta.viewCount?.toLocaleString() || '-'}x
+- *Tipe:* ${r.type}
+- *Total Poin:* ${r.keyPoints?.length || 0}\n
+*Ringkasan:*
+${r.summary}\n
+*Poin Penting:*
+${r.keyPoints.map((p, i) => `*${i + 1}. ${p.point}*\n${p.summary}`).join('\n\n')}`
+
+  await erlic.sendMessage(m.chat, {
+    image: { url: meta.thumbnail },
+    caption
+  }, { quoted: m })
 }
 break
         
@@ -4539,6 +4726,19 @@ form.append('fileToUpload', media, `file${ext}`)
 const upload = await axios.post('https://catbox.moe/user/api.php', form, { headers: form.getHeaders() })
 const imageUrl = upload.data.trim()
 const { data } = await axios.get(`https://api.fasturl.link/imgedit/aibackground?imageUrl=${encodeURIComponent(imageUrl)}&prompt=${encodeURIComponent(prompt)}`, { responseType: 'arraybuffer' })
+await erlic.sendMessage(m.chat, { image: Buffer.from(data), caption: mess.ok }, { quoted: m })
+}
+break
+        
+case 'schnell': {
+if (!m.isPrem && !isCreator && !isPrem) return m.reply(mess.premium)
+if (!text) return m.reply(func.example(cmd, 'A fox with fire wings flying at night | 2_3'))
+const [prompt, size] = text.split('|').map(v => v.trim())
+if (!prompt || !size) return m.reply('Format: prompt | size')
+const validSizes = ['1_1','1_1_HD','1_2','2_1','2_3','4_5','9_16','3_2','4_3','16_9']
+if (!validSizes.includes(size)) return m.reply(`Size tidak valid!\nPilih salah satu dari:\n${validSizes.join(', ')}`)
+await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+const { data } = await axios.get(`https://api.fasturl.link/aiimage/flux/schnell?prompt=${encodeURIComponent(prompt)}&size=${encodeURIComponent(size)}`, { responseType: 'arraybuffer' })
 await erlic.sendMessage(m.chat, { image: Buffer.from(data), caption: mess.ok }, { quoted: m })
 }
 break
@@ -5659,27 +5859,193 @@ case 'tourl': {
 }
         
  case 'jarak': {
-    if (!text.includes('ke')) return m.reply(`Contoh:\n${prefix + command} Bandung ke Jakarta`)
+  if (!text.includes(',')) return m.reply(func.example(cmd, 'Jakarta, Bandung'))
+  const [from, to] = text.split(',').map(v => v.trim())
+  if (!from || !to) return m.reply('Format salah! Contoh: Jakarta, Bandung')
 
-    let [dari, ke] = text.split('ke').map(v => v.trim())
-    if (!dari || !ke) return m.reply(`Contoh:\n${prefix + command} Surabaya ke Semarang`)
-     
-     await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
-    let data = await jarak(dari, ke)
+  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+  const url = `https://api.fasturl.link/search/routedistance?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+  const { data } = await axios.get(url)
+  if (!data || data.status !== 200 || !data.result) return m.reply(mess.error)
 
-    if (data.img) {
-        erlic.sendMessage(m.chat, {
-            image: data.img,
-            caption: data.desc?.replace('Gambar', '') || 'Tidak ada deskripsi.'
-        }, {
-            quoted: m,
-            ephemeralExpiration: m.expiration
-        })
-    } else {
-        m.reply(data.desc || 'Data tidak ditemukan.')
+  const r = data.result
+  const caption = `乂 *JARAK ${r.origin.name.toUpperCase()} → ${r.destination.name.toUpperCase()}*\n\n` +
+    `- *Dari:* ${r.origin.name} (${r.origin.address})\n` +
+    `- *Tujuan:* ${r.destination.name} (${r.destination.address})\n` +
+    `- *Jarak:* ${r.details.match(/distance of (.*?),/i)?.[1] || '-'}\n` +
+    `- *Estimasi Waktu:* ${r.details.match(/estimated time of (.*?)\./i)?.[1] || '-'}\n` +
+    `- *Perkiraan BBM:* ${r.fuelCostEstimate.totalLiters} liter (~${r.fuelCostEstimate.totalCost})`
+
+  const buttons = [
+    {
+      name: 'cta_url',
+      buttonParamsJson: JSON.stringify({
+        display_text: 'Lihat Jalur',
+        url: r.routeUrl
+      })
     }
+  ]
+
+  await erlic.sendMessage(m.chat, {
+    image: { url: r.staticMapUrl },
+    caption,
+    interactiveButtons: buttons
+  }, { quoted: m })
+}
+break
+        
+case 'thesaurus': {
+  if (!text) return m.reply(func.example(cmd, 'jahat'))
+
+  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+
+  const { data } = await axios.get(`https://api.fasturl.link/search/thesaurus?text=${encodeURIComponent(text)}`)
+  if (!data || data.status !== 200 || !data.result) return m.reply(mess.error)
+
+  const r = data.result
+  const synonyms = Array.isArray(r.synonyms)
+    ? r.synonyms.map((v, i) => `${i + 1}. ${v.word}`).join('\n')
+    : '-'
+
+  const antonyms = Array.isArray(r.antonyms) && r.antonyms.length
+    ? r.antonyms.map((v, i) => `${i + 1}. ${v.word}`).join('\n')
+    : '-'
+
+  const caption =
+`乂 *THESAURUS - ${text.toUpperCase()}*
+
+• *Sinonim*:
+${synonyms}
+
+• *Antonim*:
+${antonyms}`
+
+  if (!r.imageLink) return m.reply('Gambar tidak ditemukan.')
+
+  await erlic.sendMessage(m.chat, {
+    image: { url: r.imageLink },
+    caption
+  }, { quoted: m })
+}
+break
+        
+case 'jadwaltv': {
+  const channel = text || 'TransTV'
+  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+
+  const { data } = await axios.get(`https://api.fasturl.link/search/tvschedule?channel=${encodeURIComponent(channel)}`)
+  if (!data || data.status !== 200 || !data.result?.result?.length) return m.reply(mess.error)
+
+  const clockEmoji = {
+    0: '🕛', 1: '🕐', 2: '🕑', 3: '🕒', 4: '🕓', 5: '🕔', 6: '🕕',
+    7: '🕖', 8: '🕗', 9: '🕘', 10: '🕙', 11: '🕚', 12: '🕛',
+    '0.5': '🕧', '1.5': '🕜', '2.5': '🕝', '3.5': '🕞', '4.5': '🕟',
+    '5.5': '🕠', '6.5': '🕡', '7.5': '🕢', '8.5': '🕣', '9.5': '🕤',
+    '10.5': '🕥', '11.5': '🕦'
   }
-    break
+
+  const schedule = data.result.result.map((item, index) => {
+    const [jam, menit] = item.date.replace('WIB', '').split(':').map(Number)
+    const emojiKey = menit >= 30 ? `${jam % 12}.5` : `${jam % 12}`
+    const emoji = clockEmoji[emojiKey] || '🕒'
+    return `${index + 1}. [${item.date.replace('WIB', '')}] ${emoji} = ${item.event}`
+  }).join('\n')
+
+  const caption = `乂 *JADWAL TV - ${channel.toUpperCase()}*\n\n${schedule}`
+  await erlic.sendMessage(m.chat, { text: caption }, { quoted: m })
+}
+break
+        
+case 'tsunami': {
+  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+  const { data } = await axios.get('https://api.fasturl.link/search/bmkgtsunami')
+  if (!data || data.code !== 200 || !data.result) return m.reply(mess.error)
+
+  const latest = data.result.latestInfo
+  const list = data.result.infoList.map((x, i) =>
+    `${i + 1}. [${x.dateTime}] ${x.location}\n   - Magnitudo: ${x.magnitude}, Kedalaman: ${x.depth}\n   - Potensi: ${x.tsunamiPotential}`
+  ).join('\n\n')
+
+  const caption = `乂 *INFO TSUNAMI*\n\n` +
+    `- Tanggal: ${latest.date}\n` +
+    `- Waktu: ${latest.time}\n` +
+    `- Magnitudo: ${latest.magnitude}\n` +
+    `- Kedalaman: ${latest.depth}\n` +
+    `- Lokasi: ${latest.location}\n` +
+    `- Koordinat: ${latest.coordinates}\n` +
+    `- Potensi: ${latest.tsunamiPotential}\n\n` +
+    `▸ *Riwayat Terkait:*\n\n${list}`
+
+  await erlic.sendMessage(m.chat, { text: caption }, { quoted: m })
+}
+break
+        
+case 'cekcuaca':
+case 'cuaca': {
+  if (!text) return m.reply(func.example(cmd, 'Sukabumi'))
+  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+
+  const url = `https://api.fasturl.link/search/weather?location=${encodeURIComponent(text)}`
+  const { data } = await axios.get(url)
+  if (!data || data.status !== 200 || !data.result) return m.reply(mess.error)
+
+  const r = data.result
+  const caption = `乂 *CUACA - ${r.city.toUpperCase()}*\n\n` +
+    `- Lokasi: ${r.city}\n` +
+    `- Koordinat: ${r.latitude}, ${r.longitude}\n` +
+    `- Suhu: ${r.temperature}\n` +
+    `- Kondisi: ${r.condition}\n` +
+    `- Kelembapan: ${r.humidity}\n` +
+    `- Angin: ${r.wind}\n` +
+    `- Presipitasi: ${r.precipitation}\n` +
+    `- Tutup Awan: ${r.cloudCover}\n` +
+    `- Jarak Pandang: ${r.visibility}\n` +
+    `- Matahari Terbit: ${r.sunrise}\n` +
+    `- Matahari Terbenam: ${r.sunset}`
+
+  await erlic.sendMessage(m.chat, { text: caption }, { quoted: m })
+}
+break
+       
+case 'meteorology': case 'meteorologi': {
+  if (!text) return m.reply(func.example(cmd, 'Jakarta'))
+  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+
+  const url = `https://api.fasturl.link/search/meteorology?location=${encodeURIComponent(text)}`
+  const { data } = await axios.get(url)
+  if (!data || data.status !== 200 || !data.result) return m.reply(mess.error)
+
+  const r = data.result
+  const c = r.current
+  const l = r.location
+
+  const caption = `乂 *INFORMASI METEOROLOGI*\n\n` +
+    `- *Lokasi:* ${l.name}, ${l.region}, ${l.country}\n` +
+    `- *Koordinat:* ${l.lat}, ${l.lon}\n` +
+    `- *Zona Waktu:* ${l.tzId}\n` +
+    `- *Waktu Lokal:* ${l.localtime}\n\n` +
+    `- *Cuaca:* ${c.condition.text}\n` +
+    `- *Temperatur:* ${c.tempC}°C / ${c.tempF}°F\n` +
+    `- *Terasa Seperti:* ${c.feelslikeC}°C / ${c.feelslikeF}°F\n` +
+    `- *Kelembaban:* ${c.humidity}%\n` +
+    `- *Awan:* ${c.cloud}%\n` +
+    `- *Angin:* ${c.windKph} kph (${c.windDir}, ${c.windDegree}°)\n` +
+    `- *Tekanan Udara:* ${c.pressureMb} mb (${c.pressureIn} in)\n` +
+    `- *Presipitasi:* ${c.precipMm} mm (${c.precipIn} in)\n` +
+    `- *Jarak Pandang:* ${c.visKm} km (${c.visMiles} mi)\n` +
+    `- *Dew Point:* ${c.dewpointC}°C / ${c.dewpointF}°F\n` +
+    `- *Heat Index:* ${c.heatindexC}°C / ${c.heatindexF}°F\n` +
+    `- *Wind Chill:* ${c.windchillC}°C / ${c.windchillF}°F\n` +
+    `- *UV Index:* ${c.uv}\n` +
+    `- *Gust Angin:* ${c.gustKph} kph (${c.gustMph} mph)\n` +
+    `- *Waktu Terakhir Diperbarui:* ${c.lastUpdated}`
+
+  await erlic.sendMessage(m.chat, {
+    image: { url: r.tileUrl },
+    caption
+  }, { quoted: m })
+}
+break
         
 case 'translate': case 'tr': {
     if (!text) return erlic.sendMessage(m.chat, {
@@ -5938,21 +6304,31 @@ case 'clearsession': {
 }
 break
         
-case 'pinterest': case 'pin': {
+case 'pinterest':
+case 'pin': {
   if (!text) return erlic.sendMessage(m.chat, { text: func.example(cmd, 'anime') }, { quoted: m });
   await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
-    
-    const { generateWAMessageFromContent, proto, prepareWAMessageMedia } = await import('@whiskeysockets/baileys');
+
+  try {
+    const baileys = require('@whiskeysockets/baileys');
+    const generateWAMessageFromContent = baileys.generateWAMessageFromContent;
+    const prepareWAMessageMedia = baileys.prepareWAMessageMedia;
+    const proto = baileys.proto;
+
+    const axios = require('axios');
     const apiUrl = `https://api.siputzx.my.id/api/s/pinterest?query=${encodeURIComponent(text)}`;
     const { data } = await axios.get(apiUrl);
+
     if (!data.status || !data.data || data.data.length === 0) return m.reply('Gambar tidak ditemukan.');
 
     const results = isPrem ? data.data.slice(0, 10) : data.data.slice(0, 1);
-    if (isPrem) m.reply(`Ditemukan ${results.length} gambar, sedang mengirim slide...`);
+    if (isPrem) m.reply(`Ditemukan ${results.length} gambar, sedang mengirim...`);
 
     let cards = [];
+
     for (let i = 0; i < results.length; i++) {
       let image = await prepareWAMessageMedia({ image: { url: results[i].images_url } }, { upload: erlic.waUploadToServer });
+
       cards.push({
         header: proto.Message.InteractiveMessage.Header.fromObject({
           title: `Result #${i + 1}`,
@@ -5990,6 +6366,11 @@ case 'pinterest': case 'pin': {
 
     await erlic.relayMessage(m.chat, msgSlide.message, { messageId: msgSlide.key.id });
     await erlic.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
+
+  } catch (err) {
+    console.error(err);
+    m.reply(mess.error);
+  }
   break;
 }
         
@@ -6084,6 +6465,35 @@ m.reply(mess.errorstc)
 break
         
 case 'owner':case 'creator':{try{const masthan=global.owner.map((n,i)=>({displayName:global.ownername[i]||`Owner ${i+1}`,vcard:`BEGIN:VCARD\nVERSION:3.0\nN:${global.ownername[i]||`Owner ${i+1}`}\nFN:${global.ownername[i]||`Owner ${i+1}`}\nTEL;type=CELL;type=VOICE;waid=${n}:${n}\nADR;type=WORK:;;${(global.lokasi&&global.lokasi[i])||'-'};;;;\nEMAIL;type=Email:${(global.email&&global.email[i])||'-'}\nURL:${(global.website&&global.website[i])||'-'}\nEND:VCARD`}));const hidetag=global.owner.map(n=>n+'@s.whatsapp.net');await erlic.sendMessage(m.chat,{contacts:{displayName:'Owner Bot',contacts:masthan},mentions:hidetag},{quoted:qkontak})}catch(e){console.error(e);m.reply(mess.error)}}break;
+        
+case 'ktpmaker': {
+  if (!text) return m.reply( `Format:\n${pripek + cmd} provinsi|kota|nik|nama|ttl|jenisKelamin|golonganDarah|alamat|rtRw|kelDesa|kecamatan|agama|status|pekerjaan|kewarganegaraan|masaBerlaku|terbuat\n\n_Example:_\n${pripek + cmd} JAWA BARAT|BANDUNG|3275024509970001|${pushname.toUpperCase()}|BANDUNG, 25-09-1997|LAKI-LAKI|A|JL. SUDIRMAN NO. 123|05/08|RAWA BOBO|PASAR MINGGU|ISLAM|BELUM MENIKAH|PEGAWAI SWASTA|WNI|SEUMUR HIDUP|25-09-2023`)
+
+  const input = text.split('|')
+  if (input.length < 16) return m.reply('Semua parameter wajib diisi.\nGunakan format:\nprovinsi|kota|nik|nama|ttl|jenisKelamin|golonganDarah|alamat|rtRw|kelDesa|kecamatan|agama|status|pekerjaan|kewarganegaraan|masaBerlaku|terbuat')
+
+  const [
+    provinsi, kota, nik, nama, ttl,
+    jenisKelamin, golonganDarah, alamat, rtRw, kelDesa,
+    kecamatan, agama, status, pekerjaan, kewarganegaraan,
+    masaBerlaku, terbuat
+  ] = input
+
+  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+    
+  let pp = await erlic.profilePictureUrl(m.sender, 'image').catch(() => null)
+  if (!pp) pp = global.thumb
+
+  const api = `https://api.fasturl.link/maker/ktp?provinsi=${encodeURIComponent(provinsi)}&kota=${encodeURIComponent(kota)}&nik=${encodeURIComponent(nik)}&nama=${encodeURIComponent(nama)}&ttl=${encodeURIComponent(ttl)}&jenisKelamin=${encodeURIComponent(jenisKelamin)}&golonganDarah=${encodeURIComponent(golonganDarah)}&alamat=${encodeURIComponent(alamat)}&rtRw=${encodeURIComponent(rtRw)}&kelDesa=${encodeURIComponent(kelDesa)}&kecamatan=${encodeURIComponent(kecamatan)}&agama=${encodeURIComponent(agama)}&status=${encodeURIComponent(status)}&pekerjaan=${encodeURIComponent(pekerjaan)}&kewarganegaraan=${encodeURIComponent(kewarganegaraan)}&masaBerlaku=${encodeURIComponent(masaBerlaku)}&terbuat=${encodeURIComponent(terbuat)}&pasPhoto=${encodeURIComponent(pp)}`
+
+  const res = await axios.get(api, { responseType: 'arraybuffer' })
+
+  await erlic.sendMessage(m.chat, {
+    image: res.data,
+    caption: mess.ok
+  }, { quoted: m })
+}
+break
     
 case 'gpt3': {
   if (!text) return m.reply(func.example(cmd, 'apa itu teori relativitas?'));
@@ -6725,50 +7135,39 @@ case 'instagram':
 case 'ig': {
   if (!text) return m.reply(func.example(cmd, 'https://www.instagram.com/reel/C_Phn6NSIfQ/'))
   if (!/instagram\.com/i.test(text)) return m.reply(mess.errorUrl)
-
   await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
-
   const axios = require('axios')
-  const url = `https://api.fasturl.link/downup/igdown/advanced?url=${encodeURIComponent(text)}&type=detail`
-  const { data } = await axios.get(url)
-
-  if (!data || data.status !== 200 || !data.result) return m.reply(mess.error)
+  const apiUrl = `https://zenzxz.dpdns.org/downloader/instagram?url=${encodeURIComponent(text)}`
+  const { data } = await axios.get(apiUrl)
+  if (!data || !data.status || !data.result) return m.reply(mess.error)
   const r = data.result
-
-  // Untuk kasus video
   if (Array.isArray(r.videos) && r.videos.length > 0) {
     const caption = `乂 *INSTAGRAM DOWNLOADER*\n\n` +
-      `- *Title:* ${r.caption?.text || '-'}\n` +
-      `- *Username:* ${r.username || r.owner?.username || '-'}\n` +
-      `- *Author:* ${r.full_name || r.owner?.full_name || '-'}\n` +
+      `- *Username:* ${r.username || '-'}\n` +
+      `- *Author:* ${r.name || '-'}\n` +
       `- *Quality:* MEDIUM`
     await erlic.sendMessage(m.chat, {
       video: { url: r.videos[0] },
       caption
     }, { quoted: m })
-
-  // Untuk kasus image
   } else if (Array.isArray(r.images) && r.images.length > 0) {
     const totalImages = r.images.length
     const caption = `乂 *INSTAGRAM DOWNLOADER*\n\n` +
-      `- *Title:* ${r.caption?.text || '-'}\n` +
-      `- *Username:* ${r.username || r.owner?.username || '-'}\n` +
-      `- *Author:* ${r.full_name || r.owner?.full_name || '-'}\n` +
+      `- *Username:* ${r.username || '-'}\n` +
+      `- *Author:* ${r.name || '-'}\n` +
       `- *Quality:* MEDIUM\n` +
       `- *Total images:* ${totalImages}`
-
     for (let i = 0; i < totalImages; i++) {
       await erlic.sendMessage(m.chat, {
         image: { url: r.images[i] },
         ...(i === 0 ? { caption } : {})
       }, { quoted: m })
     }
-
   } else {
     m.reply('Tidak ada media yang dapat diunduh dari link tersebut.')
   }
+  break
 }
-break
         
 case 'mediafire': {
     const axios = require('axios')
@@ -7419,6 +7818,9 @@ if (/audio/.test(quoted?.mimetype || quoted?.mediaType || '')) {
   });
 } else m.reply(`Balas audio yang ingin diubah dengan caption *${pripek + command}*`);
 } break;
+        
+case 'glitchtext': case 'writetext': case 'advancedglow': case 'typographytext': case 'pixelglitch': case 'neonglitch': case 'flagtext': case 'flag3dtext': case 'deletingtext': case 'blackpinkstyle': case 'glowingtext': case 'underwatertext': case 'logomaker': case 'cartoonstyle': case 'papercutstyle': case 'watercolortext': case 'effectclouds': case 'blackpinklogo': case 'gradienttext': case 'summerbeach': case 'luxurygold': case 'multicoloredneon': case 'sandsummer': case 'galaxywallpaper': case '1917style': case 'makingneon': case 'royaltext': case 'freecreate': case 'galaxystyle': case 'lighteffects': { if (!m.isPrem && !isCreator && !isPrem) return m.reply(mess.premium); if (!text) return m.reply(func.example(cmd, `${global.botname} multidevice`)); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const { data } = await axios.get(`https://api.fasturl.link/maker/ephoto360?text=${encodeURIComponent(text)}&style=${cmd}`, { responseType: 'arraybuffer' }); await erlic.sendMessage(m.chat, { image: Buffer.from(data), caption: mess.ok }, { quoted: m }); }
+break
 
 case 'wangy': {
   if (!text) return erlic.sendMessage(m.chat, { text: `Masukkan nama seseorang!\n\nContoh: ${prefix}wangy Alya` }, { quoted: qtext })
