@@ -274,7 +274,15 @@
       "gconly",
       "addcase",
       "done",
-      "proses"
+      "proses",
+      "ddos",
+      "enchard",
+      "encrypt",
+      "getmodule",
+      "minifycode",
+      "listowner",
+      "addowner",
+      "delowner"
     ]
   },
   {
@@ -390,23 +398,6 @@
       "pat",
       "bonk",
       "yeet"
-    ]
-  },
-  {
-    "developer": [
-      "addowner",
-      "addbuyer",
-      "delbuyer",
-      "listbuyer",
-      "addakses",
-      "delakses",
-      "listakses",
-      "ddos",
-      "enchard",
-      "encrypt",
-      "getmodule",
-      "minifycode",
-      "listowner"
     ]
   },
   {
