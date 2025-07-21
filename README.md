@@ -20,7 +20,7 @@ Erlic is a multifunctional WhatsApp bot developed using [Baileys](https://github
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20+
 - FFMPEG
 - Min. 4GB RAM
 - Git
