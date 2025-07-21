@@ -35,7 +35,7 @@ This bot system is equipped with automatic updates, so you don't need to worry a
 ## Installation
 
 ```bash
-git clone https://github.com/your-username/erlic
+git clone https://github.com/joo1alaricc/erlic
 cd erlic
 npm install
 node index.js
