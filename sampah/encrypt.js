@@ -1,0 +1,1 @@
+"// buy the script to get the full code\nenc;"
