@@ -176,7 +176,9 @@
       "sticker2",
       "stag",
       "toviewonce",
-      "emojimix"
+      "emojimix",
+      "getexif",
+      "stickerwatermark"
     ]
   },
   {
@@ -222,7 +224,8 @@
       "soundcloud",
       "rednote",
       "tiktokmp3",
-      "spotify"
+      "spotify",
+      "aio"
     ]
   },
   {
@@ -282,7 +285,9 @@
       "minifycode",
       "listowner",
       "addowner",
-      "delowner"
+      "delowner",
+      "backupsc",
+      "autolevelup"
     ]
   },
   {
@@ -455,6 +460,28 @@
       "freecreate",
       "galaxystyle",
       "lighteffects"
+    ]
+  },
+  {
+    "user": [
+      "me",
+      "profile",
+      "unregister",
+      "register"
+    ]
+  },
+  {
+    "rpg": [
+      "adventure",
+      "berburu",
+      "kandang",
+      "create",
+      "berkebun",
+      "buybibit",
+      "sell",
+      "gudang",
+      "buy",
+      "inventory"
     ]
   }
 ]
