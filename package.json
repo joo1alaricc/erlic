@@ -5,7 +5,8 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "start2": "pm2 start main.js && pm2 save && pm2 logs"
   },
   "keywords": [
     "baileys",
@@ -21,7 +22,7 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@google/generative-ai": "^0.24.1",
     "@hapi/boom": "^10.0.0",
-    "@whiskeysockets/baileys": "github:kiuur/bails",
+    "@whiskeysockets/baileys": "npm:@whiskeysockets/baileys@6.7.17",
     "acrcloud": "^1.4.0",
     "archiver": "^6.0.2",
     "awesome-phonenumber": "^2.64.0",
@@ -32,6 +33,7 @@
     "cheerio": "^1.0.0-rc.12",
     "chess.js": "^1.0.0-beta.6",
     "child_process": "^1.0.2",
+    "chokidar": "^3.5.3",
     "cloudscraper": "^4.6.0",
     "color": "^4.0.0",
     "cookie": "^0.5.0",
@@ -79,6 +81,7 @@
     "rimraf": "^5.0.1",
     "rootpath": "^0.1.2",
     "ruhend-scraper": "^8.0.8",
+    "sharp": "latest",
     "similarity": "^1.2.1",
     "spinnies": "^0.5.1",
     "spotifydl-core": "^0.2.0",
