@@ -18,22 +18,18 @@ const FormData = require('form-data');
 module.exports = async (erlic, m) => {
 const cekError = require('./system/vmHandler'); 
 try {
+const toMs = require('ms')
+const setting = global.db.setting
+const users = global.db.users[m.sender]
+const groups = global.db.groups[m.chat]
+const antierror = require('./system/antierror');
+const autolevelup = require('./system/autolevelup');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { read } = require('jimp');
 const { MIME_JPEG } = require('jimp');
 const { styles, yStr } = require('./system/font.js');
 const handleError = require('./system/vmHandler');
 const isDev = global.developer.includes(m.sender.split('@')[0])
-const prefixDB = JSON.parse(fs.readFileSync('./database/prefix.json'))
-global.customPrefix = prefixDB.prefix
-const premiumFile = './database/premium.json'
-if (!fs.existsSync(premiumFile)) fs.writeFileSync(premiumFile, '[]')
-let premium = JSON.parse(fs.readFileSync(premiumFile))
-const bannedFile = './database/banned.json'
-if (!fs.existsSync(bannedFile)) fs.writeFileSync(bannedFile, '[]')
-let banned = JSON.parse(fs.readFileSync(bannedFile))
-const blockCmdPath = './database/blockcmd.json';
-if (!fs.existsSync(blockCmdPath)) fs.writeFileSync(blockCmdPath, '[]');
 const body =
   (m.mtype === 'conversation' && m.message.conversation) ||
   (m.mtype === 'imageMessage' && m.message.imageMessage.caption) ||
@@ -60,11 +56,11 @@ const budy = (typeof m.text === 'string') ? m.text : '';
 const sender = m.key.fromMe ? (erlic.user.id.split(':')[0]+'@s.whatsapp.net' || erlic.user.id) : (m.key.participant || m.key.remoteJid)
 const botNumber = await erlic.decodeJid(erlic.user.id)
 const senderNumber = sender.split('@')[0]
-const isCreator = (m && m.sender && ([botNumber, ...global.owner, ...global.prems, ...global.developer].map(v => v.replace(/[^0-9]/g, '') + '@s.whatsapp.net').includes(m.sender) || botNumber.includes(m.sender.replace(/[^0-9]/g, '')))) || false;
+const isCreator = (m.sender && ([botNumber, ...global.owner, ...global.prems, ...global.developer, ...setting.owner].map(v => v.replace(/[^0-9]/g, '') + '@s.whatsapp.net').includes(m.sender) || botNumber.includes(m.sender.replace(/[^0-9]/g, '')))) || false;
 const dimasathan = global.owner.includes(m.sender.split('@')[0]);
-const prefixRegex = new RegExp(`^(${global.customPrefix.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`);
-const prefa = require('./database/prefix.json')
-const pripek = prefa.prefix
+const prefi = global.db.settings?.prefix || ['.', '!']; // default jika tidak ada
+const prefixRegex = new RegExp(`^(${prefi.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`);
+const pripek = setting.prefix
 const matchedPrefix = budy.match(prefixRegex);
 const prefix = isCreator ? (matchedPrefix ? matchedPrefix[0] : '' ) : (matchedPrefix ? matchedPrefix[0] : pripek ) || pripek || '.';
 const isCmd = isCreator ? (matchedPrefix || !prefixRegex.test(body)) : budy.startsWith(prefix);
@@ -75,27 +71,30 @@ const text = q = args.join(" ")
 const pushname = m.pushName || `${senderNumber}`
 const isBot = botNumber.includes(senderNumber)
 const from = m.chat
-let isAutobio = global.autobio ? true : false
-let isAutoread = global.autoread ? true : false
-let isAutotyping = global.autotyping ? true : false
-let isAutorecord = global.autorecord ? true : false
-let isAntispam = global.antispam ? true : false
-let isGconly = global.gconly ? true : false
+let isAutobio = setting.autobio
+let isAutoread = setting.autoread
+let isAutotyping = setting.autotyping
+let isAutorecord = setting.autorecord
+let isAntispam = setting.antispam
+let isGconly = setting.gconly
 const groupCache = new Map();
+let lastFetched = 0;
+let cachedGroups = {};
 const getGroupMetadata = async (id) => {
   if (!id.endsWith('@g.us')) return {};
   if (groupCache.has(id)) return groupCache.get(id);
   try {
-    const groups = await erlic.groupFetchAllParticipating();
-    if (!(id in groups)) {
-      return {};
+    const now = Date.now();
+    if (!cachedGroups[id] || now - lastFetched > 300_000) { 
+      cachedGroups = await erlic.groupFetchAllParticipating();
+      lastFetched = now;
     }
+    if (!(id in cachedGroups)) return {};
     const data = await erlic.groupMetadata(id);
     groupCache.set(id, data);
     setTimeout(() => groupCache.delete(id), 3e5);
     return data;
   } catch (e) {
-    console.error('Gagal ambil metadata:', e?.message || e);
     return {};
   }
 };
@@ -104,11 +103,18 @@ const isBotAdmin = m.isGroup && Array.isArray(groupMetadata.participants) ? grou
 const isAdmin = m.isGroup && Array.isArray(groupMetadata.participants) ? groupMetadata.participants.some(p => p.id === m.sender && p.admin !== null) : false;
 const isAdmins = m.isGroup && Array.isArray(groupMetadata.participants) ? groupMetadata.participants.some(p => p.id === m.sender && p.admin !== null) : false;
 const isPrem = (id) => {
-const now = Date.now();
-  premium = premium.filter(p => p.expired > now);
-  fs.writeFileSync(premiumFile, JSON.stringify(premium, null, 2));
-  return premium.some(p => p.id === id && p.expired > now);
-}
+  const user = global.db.users[id];
+  if (!user || !user.premium) return false;
+  const expired = user.expired?.premium;
+  if (expired === -1) return true;
+  if (typeof expired === 'number' && expired > Date.now()) return true;
+  if (typeof expired === 'number' && expired <= Date.now()) {
+    user.premium = false;
+    user.expired.premium = null;
+    return false;
+  }
+  return false;
+};
 function capital(text) {
     return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -250,12 +256,19 @@ function ms(str) {
   };
   return num * (multipliers[unit] || 0);
 }
-const path = './database/premium.json';
 function cleanExpiredPremium() {
-  let prem = JSON.parse(fs.readFileSync(path));
   const now = Date.now();
-  prem = prem.filter(user => user.expired > now);
-  fs.writeFileSync(path, JSON.stringify(prem, null, 2));
+  const users = global.db.users;
+  for (const jid in users) {
+    const user = users[jid];
+    if (user.premium && user.expired?.premium) {
+      if (user.expired.premium < now) {
+        user.premium = false;
+        user.expired.premium = null; 
+        console.log(`[PREMIUM] Expired: ${jid}`);
+      }
+    }
+  }
 }
     
 const pathBanned = './database/banned.json';
@@ -337,6 +350,11 @@ func.texted = (type, text) => {
     }
 }
 
+func.timeReverse = function(duration) {
+    let cek = ms(duration - Date.now())
+    return `${cek.days}D ${cek.hours}H ${cek.minutes}M ${cek.seconds}S`
+}
+
 func.delay = (ms) => {
     return new Promise(res => setTimeout(res, ms))
 }
@@ -406,6 +424,17 @@ func.fetchJson = async (url, options = {}) => {
     } catch (err) {
         return err
     }
+}
+
+func.msToTime = function(ms) {
+    var milliseconds = parseInt((ms % 1000) / 100),
+        seconds = Math.floor((ms / 1000) % 60),
+        minutes = Math.floor((ms / (1000 * 60)) % 60),
+        hours = Math.floor((ms / (1000 * 60 * 60)) % 24)
+    let h = (hours < 10) ? '0' + hours : hours
+    let m = (minutes < 10) ? '0' + minutes : minutes
+    let s = (seconds < 10) ? '0' + seconds : seconds
+    return h + ':' + m + ':' + s
 }
 
 func.fdoc = {key : {participant : '0@s.whatsapp.net', ...(m.chat ? { remoteJid: `status@broadcast` } : {}) },message: {documentMessage: {title: global.wm, jpegThumbnail: ""}}}
@@ -512,14 +541,13 @@ function applyWatermarkVars(str, name = 'User') {
 }
     
 function isCmdBlocked(command, sender) {
-  const blocked = JSON.parse(fs.readFileSync('./database/blockcmd.json'));
-  const formatJid = jid => jid.includes('@') ? jid : jid + '@s.whatsapp.net';
-  const isOwner = global.owner.some(own => formatJid(own) === sender);
-  const isDev = global.developer.some(dev => formatJid(dev) === sender);
-
+  const formatJid = (jid) => (jid.includes('@') ? jid : jid + '@s.whatsapp.net');
+  const senderJid = formatJid(sender);
+  const isOwner = global.owner.some(own => formatJid(own) === senderJid);
+  const isDev = global.developer?.some(dev => formatJid(dev) === senderJid);
   if (isOwner || isDev) return false;
-
-  return blocked.includes(command);
+  const blockedCommands = global.db.settings?.blockcmd || [];
+  return blockedCommands.includes(command);
 }
 if (isCmdBlocked(command, m.sender)) return m.reply(mess.blockcmd);
     
@@ -537,60 +565,68 @@ function getFolderSize(folderPath) {
 }
     
 async function checkBlacklist(m, sender, isGroup) {
-  if (!m.isGroup) return false;
+    if (!m.isGroup) return false;
+    const groupData = global.db.groups[m.chat];
+    if (!groupData) return false;
+    const blacklist = groupData.blacklist || [];
+    const userJid = sender.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+    if (!blacklist.includes(userJid)) return false;
+    let metadata;
+    try {
+        metadata = await erlic.groupMetadata(m.chat);
+    } catch {
+        return true; 
+    }
 
-  const fs = require('fs');
-  const path = require('path');
-  const blacklistPath = path.join(__dirname, './database/blacklist.json');
-  const number = sender.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
-  if (!fs.existsSync(blacklistPath)) return false;
-  const data = JSON.parse(fs.readFileSync(blacklistPath));
-  const groupData = data.find(g => g.jid === m.chat);
-  if (!groupData || !groupData.blacklist.includes(number)) return false;
-  const metadata = await erlic.groupMetadata(m.chat);
-  const botNumber = await erlic.decodeJid(erlic.user.id);
-  const isBotAdmin = metadata.participants.some(p => p.id === botNumber && p.admin !== null);
-  if (!isBotAdmin) return true;
-  await erlic.sendMessage(m.chat, {
-    text: `Sorry @${number}, you have been blacklisted from this group.`,
-    mentions: [sender]
-  });
-  try {
-    await erlic.groupParticipantsUpdate(m.chat, [sender], 'remove');
-  } catch (err) {
-  }
-  return true;
+    const botNumber = await erlic.decodeJid(erlic.user.id);
+    const isBotAdmin = metadata.participants.some(p => p.id === botNumber && p.admin !== null);
+    if (!isBotAdmin) return true;
+
+    await erlic.sendMessage(m.chat, {
+        text: `Sorry @${userJid}, you have been blacklisted from this group.`,
+        mentions: [userJid]
+    });
+
+    try {
+        await erlic.groupParticipantsUpdate(m.chat, [userJid], 'remove');
+    } catch (err) {
+        console.error(chalk.red(`[BLACKLIST] Failed to remove ${userJid}:`, err));
+    }
+
+    return true;
 }
 
 function isBanned(id) {
-  const banned = JSON.parse(fs.readFileSync('./database/banned.json'));
-  const user = banned.find(u => u.id === id);
-  if (!user) return false;
-  if (user.until === -1) return true;
-  return Date.now() < user.until;
+    const users = global.db.users[id];
+    if (!users) return false;
+    if (!users.banned) return false;
+    if (users.expired.banned === -1) return true;
+    return Date.now() < users.expired.banned;
 }
 
-if (!isCreator && isBanned(m.sender) && !['owner'].includes(command) && isCmd) {
-  const banned = JSON.parse(fs.readFileSync('./database/banned.json'));
-  const user = banned.find(u => u.id === m.sender);
-  let untilText = 'UNKNOWN';
-  if (user) {
-    if (user.until === -1) {
-      untilText = 'PERMANENT';
-    } else {
-      let diff = user.until - Date.now();
-      if (diff < 0) diff = 0;
-      const totalSeconds = Math.floor(diff / 1000);
-      const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
-      const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
-      const seconds = String(totalSeconds % 60).padStart(2, '0');
-      untilText = `${hours}:${minutes}:${seconds}`;
+if (!isCreator && isBanned(m.sender) && !['owner', 'me'].includes(command) && isCmd) {
+    const users = global.db.users[m.sender];
+    let untilText = 'UNKNOWN';
+
+    if (users && users.banned) {
+        if (users.expired.banned === -1) {
+            untilText = 'PERMANENT';
+        } else {
+            let diff = users.expired.banned - Date.now();
+            if (diff < 0) diff = 0;
+            const totalSeconds = Math.floor(diff / 1000);
+            const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+            const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+            const seconds = String(totalSeconds % 60).padStart(2, '0');
+            untilText = `${hours}:${minutes}:${seconds}`;
+        }
     }
-  }
-  return erlic.sendMessage(m.chat, {
-    text: `Maaf kamu sedang dibanned.\nBerakhir: *${untilText}*`
-  }, { quoted: m });
+
+    return erlic.sendMessage(m.chat, {
+        text: `Maaf kamu sedang dibanned.\nBerakhir: *${untilText}*`
+    }, { quoted: m });
 }
+
 const listidch = JSON.parse(fs.readFileSync('./database/erlicch.json'));
     
 function isPublicModeAllowed(command, sender) {
@@ -611,8 +647,6 @@ const argsbiyuoffc = body.trim().split(/ +/).slice(1)
 
 if (await checkBlacklist(m, sender, m.isGroup)) return;
     
-const checkServerExpiry=async(erlic)=>{const fs=require('fs');const path=require('path');const moment=require('moment');const axios=require('axios');const panelFile=path.join(__dirname,'./database/panel.json');if(!fs.existsSync(panelFile))return;const rawData=fs.readFileSync(panelFile);const serverData=JSON.parse(rawData);let updated=false;for(let i=0;i<serverData.length;i++){const s=serverData[i].server;const expire=moment(s.expire,'YYYY-MM-DD');const now=moment();const diffDays=expire.diff(now,'days');if(diffDays===3&&!serverData[i].warned){await erlic.sendMessage(serverData[i].jid,{text:`Your server (${s.username}) will expire in 3 days.`},{ quoted: func.fstatus('Panel Notification')});serverData[i].warned=true;updated=true;}else if(diffDays<=0&&!serverData[i].suspended){await erlic.sendMessage(serverData[i].jid,{text:`Your server (${s.username}) has expired and the server has been suspended.`}, { quoted: func.fstatus('Panel Notification')});try{await axios.post(`${global.domain}/api/application/servers/${s.id}/suspend`,{},{headers:{Accept:"application/json","Content-Type":"application/json",Authorization:`Bearer ${global.apikey}`}});serverData[i].suspended=true;updated=true;}catch(e){console.log('Failed to suspend server:',e.message);}}}if(updated)fs.writeFileSync(panelFile,JSON.stringify(serverData,null,2));};setInterval(async()=>{try{await checkServerExpiry(erlic);}catch(e){console.error('Error during panel expiry check:',e.message);}},60*60*1000);
-    
 if (isAutobio) {
     const ownerDisplaay = Array.isArray(global.ownername) ? global.ownername.join(' x ') : global.ownername;
     let _uptime = process.uptime() * 1000;
@@ -626,14 +660,14 @@ if (isAutoread && !m.isGroup && (m.mtype === 'conversation' || m.mtype === 'exte
     
 const delay = ms => new Promise(res => setTimeout(res, ms))
 if ((body.startsWith(prefix) || body.startsWith(pripek))) {
-  erlic.sendPresenceUpdate(global.online ? 'available' : 'unavailable', m.chat)
+  erlic.sendPresenceUpdate(setting.online ? 'available' : 'unavailable', m.chat)
   if (!m.isGroup) {
-    if (global.autotyping && !m.fromMe && !isBot && cmd && command) {
+    if (setting.autotyping && !m.fromMe && !isBot && cmd && command) {
       erlic.sendPresenceUpdate('composing', m.chat)
       await delay(825)
       erlic.sendPresenceUpdate('paused', m.chat)
     }
-    if (global.autorecord && !m.fromMe && !isBot && cmd && command) {
+    if (setting.autorecord && !m.fromMe && !isBot && cmd && command) {
       erlic.sendPresenceUpdate('recording', m.chat)
       await delay(2000)
       erlic.sendPresenceUpdate('paused', m.chat)
@@ -641,57 +675,55 @@ if ((body.startsWith(prefix) || body.startsWith(pripek))) {
   }
 }
     
-if (global.antispam && !m.isGroup && !m.fromMe && !isCreator && cmd && command) {
-  const fs = require('fs');
-  const cooldown = global.cooldown || 5;
-  const spamFile = './database/spam.json';
-  if (!fs.existsSync(spamFile)) fs.writeFileSync(spamFile, '{}');
-  let userSpam = JSON.parse(fs.readFileSync(spamFile));
-
-  if (!userSpam[m.sender]) {
-    userSpam[m.sender] = {
-      lastCommand: Date.now(),
-      spamCount: 0,
+if (setting?.antispam !== false && 
+  !m.isGroup &&
+  !m.fromMe &&
+  !isCreator &&
+  cmd &&
+  command
+) {
+  const user = global.db.users[m.sender];
+  if (!user) {
+    global.db.users[m.sender] = {};
+  }
+  const dbUser = global.db.users[m.sender];
+  if (typeof dbUser.banned === 'undefined') dbUser.banned = false;
+  if (!dbUser.expired) dbUser.expired = {};
+  if (typeof dbUser.expired.banned === 'undefined') dbUser.expired.banned = null;
+  
+  if (!dbUser.spam) {
+    dbUser.spam = {
+      lastCommand: 0,
+      spamCount: 0
     };
   }
 
+  const cooldown = global.db.settings.cooldown || 5; 
   const now = Date.now();
-  const timeDiff = (now - userSpam[m.sender].lastCommand) / 1000;
+  const timeDiff = (now - dbUser.spam.lastCommand) / 1000; 
 
   if (timeDiff < cooldown) {
-    userSpam[m.sender].spamCount++;
-    await erlic.sendMessage(m.chat, { text: `System detects you are spamming, cooldown for ${cooldown} seconds.`},{ quoted: m});
-    
-    userSpam[m.sender].lastCommand = now;
-    fs.writeFileSync(spamFile, JSON.stringify(userSpam, null, 2));
-    
-    if (userSpam[m.sender].spamCount >= 3) {
-      await erlic.sendMessage(m.chat, { text: `You spam and make the bot delay, you will be banned.`},{ quoted: func.fstatus('System Notification')});
-      
-      const bannedFile = './database/banned.json';
-      if (!fs.existsSync(bannedFile)) fs.writeFileSync(bannedFile, '[]');
-      let banned = JSON.parse(fs.readFileSync(bannedFile));
-      
-      const index = banned.findIndex(entry => entry.id === m.sender);
-      if (index !== -1) {
-        banned[index].until = -1;
-      } else {
-        banned.push({ id: m.sender, until: -1 });
-      }
-      
-      fs.writeFileSync(bannedFile, JSON.stringify(banned, null, 2));
-    }
-    
-    return;
-  } else {
-    userSpam[m.sender].spamCount = 0;
-  }
+    dbUser.spam.spamCount++;
+    dbUser.spam.lastCommand = now;
 
-  userSpam[m.sender].lastCommand = now;
-  fs.writeFileSync(spamFile, JSON.stringify(userSpam, null, 2));
+    await erlic.sendMessage(m.chat, {
+      text: `System detects you are spamming. Please wait ${cooldown} seconds between commands.`
+    }, { quoted: m });
+    if (dbUser.spam.spamCount >= 3) {
+      dbUser.banned = true;
+      dbUser.expired.banned = -1; 
+
+      await erlic.sendMessage(m.chat, {
+        text: `You have been banned permanently due to excessive spamming.`
+      }, { quoted: m });
+    }
+  } else {
+    dbUser.spam.spamCount = 0;
+    dbUser.spam.lastCommand = now;
+  }
 }
 
-if (global.gconly) {
+if (setting.gconly) {
 const metadata = await getGroupMetadata(global.idgc)
 if (
 !isCreator &&
@@ -721,104 +753,659 @@ showAdAttribution: false
 }, { quoted: func.fstatus('System Notification') })
 }
     
-async function autoBackup(erlic,m){setInterval(async()=>{const fs=require("fs"),{execSync}=require("child_process"),path="./database/lastBackup.json";const now=new Date(),hourStamp=now.toISOString().slice(0,13);let last=fs.existsSync(path)?JSON.parse(fs.readFileSync(path)).hourStamp:null;if(hourStamp===last)return;fs.writeFileSync(path,JSON.stringify({hourStamp}));const ls=(execSync("ls")).toString().split("\n").filter(pe=>!["node_modules","session","tmp","package-lock.json",""].includes(pe));const zipName=`backup_${hourStamp.replace(/:/g,"-")}.zip`;execSync(`zip -r ${zipName} ${ls.join(" ")}`);const size=fs.statSync(`./${zipName}`).size,sizeFormatted=size<1024*1024?`${(size/1024).toFixed(2)} KB`:`${(size/(1024*1024)).toFixed(2)} MB`;const combined=[...(global.owner||[])],uniqueJids=[...new Set(combined.map(num=>num.replace(/\D/g,"")+"@s.whatsapp.net"))];for(let jid of uniqueJids)await erlic.sendMessage(jid,{document:fs.readFileSync(`./${zipName}`),caption:`Berikut adalah file backup kode bot ${global.botname}.\nSize: ${sizeFormatted}`,mimetype:"application/zip",fileName:zipName},{quoted:func.fstatus('Backup Automatically')});execSync(`rm -rf ${zipName}`);},2*60*60*1000);}
+async function inisialisasi(sender) {
+    if (!global.db.users) global.db.users = {};
+    if (!global.db.users[sender]) {
+        global.db.users[sender] = new Proxy({}, {
+            get(target, prop) {
+                if (prop === 'register' || prop === 'premium') return target[prop]; 
+                if (!(prop in target)) target[prop] = 0;
+                return target[prop];
+            },
+            set(target, prop, value) {
+                target[prop] = value;
+                return true;
+            }
+        });
+    }
+    return global.db.users[sender];
+}
+    
+async function autoBackup(erlic,m){setInterval(async()=>{const fs=require('fs');const{execSync}=require('child_process');const now=new Date();const hourStamp=now.toISOString().slice(0,13);const logPath='./sampah/backup.log';const zipName=`backup_${hourStamp.replace(/:/g,'-')}.zip`;if(global.db.settings.lastBackup===hourStamp)return;global.db.settings.lastBackup=hourStamp;const ls=execSync('ls').toString().split('\n').map(f=>f.trim()).filter(f=>f!==''&&!['node_modules','session','tmp','package-lock.json'].includes(f));try{execSync(`zip-r ${zipName}${ls.join(' ')}`);}catch(e){fs.appendFileSync(logPath,`[${hourStamp}] Gagal zip:${e.message}\n`);return;}const size=fs.statSync(`./${zipName}`).size;const sizeFormatted=size<1024*1024?`${(size/1024).toFixed(2)}KB`:`${(size/1024/1024).toFixed(2)}MB`;const jids=[...new Set((global.owner||[]).map(n=>n.replace(/\D/g,'')+'@s.whatsapp.net'))];for(const jid of jids){try{await erlic.sendMessage(jid,{document:fs.readFileSync(`./${zipName}`),caption:`Berikut adalah file backup kode bot ${global.botname}.\nSize:${sizeFormatted}`,mimetype:'application/zip',fileName:zipName},{quoted:func.fstatus?func.fstatus("Backup Automatically"):undefined});fs.appendFileSync(logPath,`[${hourStamp}] Backup terkirim ke ${jid}(${sizeFormatted})\n`);}catch(e){fs.appendFileSync(logPath,`[${hourStamp}] Gagal kirim ke ${jid}:${e.message}\n`);}}try{if(fs.existsSync(`./${zipName}`)){execSync(`rm-rf ${zipName}`);}}catch(e){fs.appendFileSync(logPath,`[${hourStamp}] Gagal hapus ${zipName}:${e.message}\n`);}},2*60*60*1000);}
 await autoBackup(erlic,m)
    
 function checkCommandTypo(command, budy, m, pripek) { try { const fs = require('fs'), path = require('path'), similarity = require('similarity'); let menuCommands = []; try { const menuData = JSON.parse(fs.readFileSync(path.join(__dirname, './database/menu.json'))); menuCommands = Object.values(menuData).flatMap(obj => Object.values(obj).flat()).map(cmd => cmd.toLowerCase()); } catch (e) { console.warn(e); } let erlicCases = []; try { const erlicPath = path.join(__dirname, 'erlic.js'), content = fs.readFileSync(erlicPath, 'utf-8'), caseRegex = /case\s+['"`](.+?)['"`]\s*:/g; let match; while ((match = caseRegex.exec(content)) !== null) erlicCases.push(match[1].toLowerCase()); } catch (e) { console.warn(e); } const help = [...new Set([...menuCommands, ...erlicCases])]; if (help.includes(command) || /^\$|>|\bx\b/i.test(budy)) return; const ranked = help.map(cmd => ({ cmd, sim: similarity(command, cmd) })).filter(v => v.sim >= 0.5 && v.sim <= 0.9).sort((a, b) => b.sim - a.sim); const typedPrefix = budy.slice(0, 1); if (ranked.length && /^[^a-zA-Z0-9]/.test(budy) && !m.fromMe && !isBot && !ranked.some(item => item.cmd === command.toLowerCase())) m.reply(`Command tidak ditemukan, mungkin maksud kamu:\n\n${ranked.map(v => `➠ *${pripek}${v.cmd}* (${(v.sim * 100).toFixed(1)}%)`).join('\n')}`); } catch (e) { console.error(e); } }
 checkCommandTypo(command, budy, m, pripek);
-
+ 
+await autolevelup(erlic, m, setting, groups)
+await antierror(erlic,m)
 switch(command) {
 case `${global.botname}`: case "menu": {
-  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
-  const { performance } = require('perf_hooks');
-  let timestamp = performance.now();
-  let latensi = performance.now() - timestamp;
-  let respon = latensi.toFixed(4);
-  let ppuser = global.thumb
-  const fs = require('fs');
-  const { styles } = require('./system/font.js');
-  const path = './database/menu.json';
-  const menu = JSON.parse(fs.readFileSync(path));
-  const formatCategory = (text) => text.toUpperCase().split('').join(' ');
-  const formatCommands = (cmds) => cmds.sort().map(cmd => `◦ ${pripek}${cmd}`).join('\n');
-  const categoriesMap = {};
-  menu.forEach(obj => {
-    const [category, commands] = Object.entries(obj)[0];
-    categoriesMap[category.toLowerCase()] = commands;
-  });
-  const selectedCategory = args.join(' ')?.toLowerCase();
-  const pkg = require('./package.json');
-const totalFitur = menu.reduce((total, obj) => total + Object.values(obj)[0].length, 0);
-const usedMem = func.fileSize(process.memoryUsage().rss);
-const maxMem = (process.env.SERVER_MEMORY && process.env.SERVER_MEMORY != 0) ? `${process.env.SERVER_MEMORY} MB` : '∞';
-const ownerDisplay = Array.isArray(global.ownername) ? global.ownername.join(' x ') : global.ownername;
-const header = `Hallo ${pushname} 👋🏻\nSaya adalah sistem otomatis berbasis WhatsApp yang dirancang oleh *${capital(ownerDisplay)}* untuk membantu berbagai kebutuhan hanya melalui chat.\n\n- *Library* : @whiskeysockets/baileys\n- *Version* : ${pkg.name}-md v${pkg.version}\n- *Total Fitur* : ${totalFitur}\n- *Memory Used* : ${usedMem} / ${maxMem}\n- *Platform* : ${process.platform} ${process.arch}\n- *Hostname* : ${process.env.HOSTNAME ?? '-'}\n\nJika kamu menemukan error atau ingin upgrade ke *Premium*, silakan hubungi owner.\n\n━━━━━━━━━━━━━━━`;
-  let replyText = '';
-  if (!selectedCategory) {
+    await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
+    const { performance } = require('perf_hooks');
+    let timestamp = performance.now();
+    let latensi = performance.now() - timestamp;
+    let respon = latensi.toFixed(4);
+    let ppuser = setting.cover;
+    const fs = require('fs');
+    const { styles } = require('./system/font.js');
+    const path = './database/menu.json';
+    const menu = JSON.parse(fs.readFileSync(path));
+    const formatCategory = (text) => text.toUpperCase().split('').join(' ');
+    const formatCommands = (cmds) => cmds.sort().map(cmd => `◦ ${pripek}${cmd}`).join('\n');
+    const categoriesMap = {};
+    menu.forEach(obj => {
+        const [category, commands] = Object.entries(obj)[0];
+        categoriesMap[category.toLowerCase()] = commands;
+    });
+    const selectedCategory = args.join(' ')?.toLowerCase();
+    const dbPath = "./database/database.json";
+    let dbSizeInBytes = 0;
+    if (fs.existsSync(dbPath)) {
+        dbSizeInBytes = fs.statSync(dbPath).size;
+    }
+    const formatKB = (bytes) => `${(bytes / 1024).toFixed(2)} KB`;
+    const databaseLabel = `Local (${formatKB(dbSizeInBytes)})`;
+    const pkg = require('./package.json');
+    const libraryInfo = pkg.dependencies?.["@adiwajshing/baileys"]
+        ? `@adiwajshing/baileys@^${require("@adiwajshing/baileys/package.json").version}`
+        : pkg.dependencies?.["@whiskeysockets/baileys"]
+            ? `@whiskeysockets/baileys@^${require("@whiskeysockets/baileys/package.json").version}`
+            : "baileys";
+    const totalFitur = menu.reduce((total, obj) => total + Object.values(obj)[0].length, 0);
+    const usedMem = func.fileSize(process.memoryUsage().rss);
+    const maxMem = (process.env.SERVER_MEMORY && process.env.SERVER_MEMORY != 0) ? `${process.env.SERVER_MEMORY} MB` : '∞';
+    const ownerDisplay = Array.isArray(global.ownername) ? global.ownername.join(' x ') : global.ownername;
+    const menuHeaderStyle = setting?.menus || 1;
+    let header = '';
+    switch (menuHeaderStyle) {
+        case 1:
+            header = `Hallo ${pushname} 👋🏻\nSaya adalah sistem otomatis berbasis WhatsApp yang dirancang oleh *${capital(ownerDisplay)}* untuk membantu berbagai kebutuhan hanya melalui chat.\n\n- *Database* : ${databaseLabel}\n- *Library* : ${libraryInfo}\n- *Version* : ${pkg.name}-md v${pkg.version}\n- *Total Fitur* : ${totalFitur}\n- *Memory Used* : ${usedMem} / ${maxMem}\n- *Platform* : ${process.platform} ${process.arch}\n- *Hostname* : ${process.env.HOSTNAME ?? '-'}\n\nJika kamu menemukan error atau ingin upgrade ke *Premium*, silakan hubungi owner.\n\n━━━━━━━━━━━━━━━`;
+            break;
+        case 2:
+            header = `Hello ${pushname} 👋🏻 
+I am an automated system (WhatsApp Bot) that can help to do something, search and get data / information only through WhatsApp.
+
+–   *INFORMATION*
+┌  ◦ Database : ${databaseLabel}
+│  ◦ Library : ${libraryInfo}
+│  ◦ Version : ${pkg.name}-md v${pkg.version}
+│  ◦ Memory Used : ${usedMem} / ${maxMem}
+│  ◦ Platform : ${process.platform} ${process.arch}
+│  ◦ Total Features : ${totalFitur}
+└  ◦ Hostname : ${process.env.HOSTNAME ?? '-'}
+
+━━━━━━━━━━━━━━━`;
+            break;
+        case 3:
+            header = `🌟 Heii ${pushname}!! 👋😄  
+Aku di sini siap nemenin kamu 24/7 💬✨  
+Dibuat khusus oleh *${capital(ownerDisplay)}* 🛠️ biar semua urusan kamu jadi gampang! 🚀  
+
+📂 *Database* : ${databaseLabel} 📡  
+📚 *Library* : ${libraryInfo} 💻  
+🛠️ *Version* : ${pkg.name}-md v${pkg.version} 🔥  
+⚡ *Total Fitur* : ${totalFitur} 🎯  
+💾 *Memory Used* : ${usedMem} / ${maxMem} 🧠  
+💻 *Platform* : ${process.platform} ${process.arch} 🖥️  
+🏠 *Hostname* : ${process.env.HOSTNAME ?? '-'} 🏡  
+
+💡 Ketemu bug? 🐞  
+Atau mau jadi *Premium* biar makin kece? 💎  
+Langsung chat owner aja 📞😉  
+
+━━━━━━━━━━━━━━━`;
+            break;
+        case 4:
+            header = `── ✦ System Overview for ${pushname} ✦ ──
+
+Owner        : ${capital(ownerDisplay)}
+Database     : ${databaseLabel}
+Library      : ${libraryInfo}
+Version      : ${pkg.name}-md v${pkg.version}
+Features     : ${totalFitur}
+Memory       : ${usedMem} / ${maxMem}
+Environment  : ${process.platform} ${process.arch}
+Hostname     : ${process.env.HOSTNAME ?? '-'}
+
+Need support or want to upgrade to *Premium*?  
+Reach out to the owner for exclusive access.
+
+────────────────────────────────────`;
+            break;
+        case 5:
+            const status = isCreator ? 'Premium • Active' : 'Standard • Upgrade available';
+            header = `Hallo ${pushname},
+
+Sistem otomatis WhatsApp oleh *${capital(ownerDisplay)}*
+Status        : ${status}
+Database      : ${databaseLabel}
+Library       : ${libraryInfo}
+Version       : ${pkg.name}-md v${pkg.version}
+Fitur         : ${totalFitur}
+Memory        : ${usedMem} / ${maxMem}
+Platform      : ${process.platform} ${process.arch}
+Hostname      : ${process.env.HOSTNAME ?? '-'}
+
+Butuh bantuan atau ingin naik ke *Premium*? Hubungi owner.
+
+──────────────`;
+            break;
+        case 6:
+            header = `
+📻 *Siaran Khusus untuk* ${pushname}
+
+Hai! Aku sistem otomatis via WhatsApp, dibuat oleh *${capital(ownerDisplay)}*.  
+Catatan teknismu hari ini:
+
+» Database  : ${databaseLabel}  
+» Library   : ${libraryInfo}  
+» Versi     : ${pkg.name}-md v${pkg.version}  
+» Fitur     : ${totalFitur}  
+» Memori    : ${usedMem} / ${maxMem}  
+» Platform  : ${process.platform} ${process.arch}  
+» Hostname  : ${process.env.HOSTNAME ?? '-'}
+
+Kalau ada yang aneh atau kamu pengin upgrade,  
+tinggal sapa owner — dia yang pegang pengaturannya.  
+
+— selamat melanjutkan aktivitasmu —
+`;
+            break;
+        default:
+            header = `Hallo ${pushname} 👋🏻\nSaya adalah sistem otomatis berbasis WhatsApp yang dirancang oleh *${capital(ownerDisplay)}* untuk membantu berbagai kebutuhan hanya melalui chat.\n\n- *Database* : ${databaseLabel}\n- *Library* : ${libraryInfo}\n- *Version* : ${pkg.name}-md v${pkg.version}\n- *Total Fitur* : ${totalFitur}\n- *Memory Used* : ${usedMem} / ${maxMem}\n- *Platform* : ${process.platform} ${process.arch}\n- *Hostname* : ${process.env.HOSTNAME ?? '-'}\n\nJika kamu menemukan error atau ingin upgrade ke *Premium*, silakan hubungi owner.\n\n━━━━━━━━━━━━━━━`;
+    }
+    let replyText = '';
+    if (!selectedCategory) {
     const sortedCategories = Object.keys(categoriesMap).sort();
     const lines = sortedCategories.map((cat, i, arr) => {
-      const menus = i === 0 ? '┌' : (i === arr.length - 1 ? '│' : '│');
-      return `${menus}  ◦ ${pripek}${command} ${cat}`;
+        const menus = i === 0 ? '┌' : (i === arr.length - 1 ? '└' : '│');
+        return `${menus}  ◦ ${pripek}${command} ${cat}`;
     });
     lines.push(`└  ◦ ${pripek}${command} all`);
     replyText = `${header}\n\n${lines.join('\n')}\n\n━━━━━━━━━━━━━━━━━━━━━━\n${global.footer}`;
-  } else if (selectedCategory === 'all') {
+} else if (selectedCategory === 'all') {
     const sortedMenu = Object.entries(categoriesMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([cat, cmds]) => `\n乂  *${formatCategory(cat)}*\n\n${formatCommands(cmds)}`)
-      .join('\n');
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([cat, cmds]) => `\n乂  *${formatCategory(cat)}*\n\n${formatCommands(cmds)}`)
+        .join('\n');
     replyText = `${header}\n${sortedMenu}\n\n━━━━━━━━━━━━━━━━━━━━━━\n${global.footer}`;
-  } else if (selectedCategory === 'all') {
-    const sortedMenu = Object.entries(categoriesMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([cat, cmds]) => `\n乂  *${formatCategory(cat)}*\n\n${formatCommands(cmds)}`)
-      .join('\n');
-    replyText = `${header}\n${sortedMenu}\n\n━━━━━━━━━━━━━━━━━━━━━━\n${global.footer}`;
-  } else if (categoriesMap[selectedCategory]) {
+} else if (categoriesMap[selectedCategory]) {
     const cmds = categoriesMap[selectedCategory];
     const formatted = formatCommands(cmds);
     replyText = `乂  *${formatCategory(selectedCategory)}*\n\n${formatted}`;
-  } else {
-   return m.reply(`Kategori *${selectedCategory}* tidak ditemukan.`);
-  }
-  const styledText = styles(replyText, global.font);
-  let masthan = await erlic.sendMessage(m.chat, {
-  text: styledText,
-  contextInfo: {
-    isForwarded: true,
-    forwardingScore: 999,
-    mentionedJid: [m.sender],
-    forwardedNewsletterMessageInfo: {
-      newsletterJid: global.idSaluran,
-      newsletterName: `Ping: ${respon} • ` + global.wm
-    },
-    externalAdReply: {
-      title: global.header,
-      body: global.footer,
-      thumbnailUrl: ppuser,
-      sourceUrl: global.link,
-      mediaType: 1,
-      renderLargerThumbnail: true,
-      showAdAttribution: false
+} else {
+    await m.reply(`Kategori *${selectedCategory}* tidak ditemukan.`);
+    await erlic.sendMessage(m.chat, { react: { text: '❌', key: m.key }})
+    return
+}
+let styledText, message;
+if (selectedCategory && selectedCategory !== 'all') {
+   const styledext = styles(replyText, setting.style);
+    message = { text: styledext };
+} else {
+    styledText = styles(replyText, setting.style);
+    const menuStyle = setting?.menu || global.menu || 1;
+    switch (menuStyle) {
+        case 1:
+            message = { text: styledText };
+            break;
+        case 2:
+            message = {
+                text: styledText,
+                contextInfo: {
+                    isForwarded: true,
+                    forwardingScore: 999,
+                    mentionedJid: [m.sender],
+                    forwardedNewsletterMessageInfo: {
+                        newsletterJid: global.idSaluran,
+                        newsletterName: `Ping: ${respon} • ${global.wm}`
+                    },
+                    externalAdReply: {
+                        title: global.header,
+                        body: global.footer,
+                        thumbnailUrl: ppuser,
+                        sourceUrl: setting.link,
+                        mediaType: 1,
+                        renderLargerThumbnail: true,
+                        showAdAttribution: false
+                    }
+                }
+            };
+            break;
+        case 3:
+            const coverUrl = setting.cover;
+            let jpegBuffer;
+            try {
+                if (fs.existsSync("./media/thumb.png")) {
+                    jpegBuffer = fs.readFileSync("./media/thumb.png");
+                } else {
+                    const axios = require('axios');
+                    const response = await axios.get(coverUrl, { responseType: 'arraybuffer' });
+                    jpegBuffer = Buffer.from(response.data);
+                }
+            } catch {
+                jpegBuffer = null;
+            }
+            message = {
+                document: { url: coverUrl },
+                jpegThumbnail: jpegBuffer,
+                mimetype: 'image/png',
+                fileName: `M E N U${selectedCategory === 'all' ? ' - A L L' : ''}`,
+                fileLength: 109951162777600,
+                pageCount: 9999922,
+                caption: styledText,
+                contextInfo: {
+                    forwardedNewsletterMessageInfo: {
+                        newsletterJid: global.idSaluran,
+                        newsletterName: `Ping: ${respon} • ${global.wm}`
+                    },
+                    mentionedJid: [m.sender],
+                    forwardingScore: 999,
+                    isForwarded: true,
+                    externalAdReply: {
+                        title: global.header,
+                        body: global.footer,
+                        thumbnailUrl: coverUrl,
+                        sourceUrl: setting.link,
+                        mediaType: 1,
+                        renderLargerThumbnail: true,
+                        showAdAttribution: false
+                    }
+                }
+            };
+            break;
+        case 4:
+            const paymentMessage = {
+                requestPaymentMessage: {
+                    currencyCodeIso4217: 'IDR',
+                    amount1000: '10000000',
+                    requestFrom: m.sender,
+                    noteMessage: {
+                        extendedTextMessage: {
+                            text: styledText,
+                            contextInfo: {
+                                mentionedJid: [m.sender],
+                                isForwarded: true,
+                                forwardedNewsletterMessageInfo: {
+                                    newsletterJid: global.idSaluran,
+                                    newsletterName: `Ping: ${respon} • ${global.wm}`
+                                },
+                                externalAdReply: {
+                                    title: '',
+                                    body: '',
+                                    thumbnailUrl: ppuser,
+                                    sourceUrl: setting.link,
+                                    mediaType: 1,
+                                    renderLargerThumbnail: true
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+            await erlic.relayMessage(m.chat, paymentMessage, {});
+            return;
+        default:
+            message = { text: styledText };
+            break;
+    }
+}
+    const masthan = await erlic.sendMessage(m.chat, message, { quoted: m });
+    if (selectedCategory === 'all') {
+        let soundUrl;
+        if (Array.isArray(global.sound)) {
+            if (global.sound.length === 0) break;
+            soundUrl = global.sound[Math.floor(Math.random() * global.sound.length)];
+        } else {
+            soundUrl = global.sound;
+        }
+        await erlic.sendMessage(m.chat, {
+            audio: { url: soundUrl },
+            mimetype: 'audio/mpeg',
+            ptt: true
+        }, { quoted: masthan });
+    }
+}
+break;
+        
+ case 'setmenu': {
+    if (!isCreator) return m.reply(mess.owner);
+    const menuStyle = args[0];
+    const availableStyles = ['1','2','3','4'];
+
+    if (!menuStyle) {
+        return m.reply(`
+乂 SETTING MENU
+
+1. Teks biasa
+2. Teks + Ad + Newsletter 
+3. Dokumen message
+4. Payment message
+
+Contoh: ${pripek}setmenu 2
+        `.trim());
+    }
+
+    if (!availableStyles.includes(menuStyle)) {
+        return m.reply(`Hanya tersedia ${availableStyles.length} style.`)
+}
+    setting.menu = parseInt(menuStyle);
+    require('./system/database.js').saveDatabase();
+    m.reply(`Berhasil mengubah gaya menu ke style ${menuStyle}`);
+    }
+    break;
+        
+ case 'setmenu2': {
+    if (!isCreator) return m.reply(mess.owner);
+
+    const menuHeaderStyle = args[0];
+    const availableStyles = ['1', '2', '3', '4', '5', '6'];
+
+    if (!menuHeaderStyle) {
+        return m.reply(`
+乂 SETTING HEADER MENU
+
+1. Default
+2. English
+3. Friendly
+4. Formal
+5. Semi-formal
+6. Semi-vintage
+
+Contoh: ${pripek}setmenu2 3
+        `.trim());
+    }
+
+    if (!availableStyles.includes(menuHeaderStyle)) {
+        return m.reply(`Hanya tersedia ${availableStyles.length} style.`);
+    }
+
+    setting.menus = parseInt(menuHeaderStyle);
+    require('./system/database.js').saveDatabase();
+    m.reply(`Berhasil mengubah tampilan header menu ke style ${menuHeaderStyle}`);
+     }
+    break;
+        
+case 'daftar':
+case 'register': {
+  if (m.isGroup) return m.reply(mess.private);
+  const user = global.db.users[m.sender];
+  if (user?.register) return m.reply('Kamu sudah pernah melakukan registrasi.');
+  if (!text) return m.reply(func.example(cmd, `${pushname}, 18, male`));
+  const parts = text.split(',').map(v => v.trim());
+  if (parts.length !== 3) return m.reply(func.example(cmd, `${pushname}, 18, male`));
+  const [name, ageStr, genderInput] = parts;
+  const age = parseInt(ageStr);
+  const gender = genderInput.toLowerCase();
+  if (!name || name.length < 2) return m.reply('Nama tidak valid.');
+  if (isNaN(age) || age < 5 || age > 120) return m.reply('Umur harus angka antara 5 hingga 120.');
+  if (gender !== 'male' && gender !== 'female') return m.reply('Gender hanya bisa: male atau female.');
+  const now = new Date();
+  const tzOffset = 7 * 60 * 60 * 1000;
+  const localDate = new Date(now.getTime() + tzOffset);
+  const formattedDate = localDate.toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  }); 
+  if (!global.db.users[m.sender]) global.db.users[m.sender] = {};
+  const u = global.db.users[m.sender];
+  u.register = true;
+  u.name = name;
+  u.age = age;
+  u.limit += 50
+  u.gender = gender === 'male' ? 'Laki-laki' : 'Perempuan';
+  u.date = formattedDate;
+  await erlic.sendMessage(m.chat, {
+    text: `✅ Successfully registered\n\n- *Name:* ${u.name}\n- *Age:* ${u.age}\n- *Gender:* ${u.gender}\n- *Date:* ${u.date}\n\n_Send ${global.db.settings?.prefix || '.'}unregister if the data you entered is incorrect_`
+  }, { quoted: m });
+    if (!isCreator) {
+  const ownerJids = [...new Set(
+    (global.owner || [])
+      .map(o => o.replace(/\D/g, '') + '@s.whatsapp.net')
+  )];
+  const caption = `Users registered!\n\n` +
+    `Name: ${u.name}\n` +
+    `Age: ${u.age}\n` +
+    `Gender: ${u.gender}\n` +
+    `Date: ${u.date}\n` +
+    `Number: ${m.sender.split('@')[0]}`;
+  for (const jid of ownerJids) {
+    try {
+      await erlic.sendMessage(jid, {
+        document: fs.readFileSync('./database/database.json'),
+        fileName: 'database.json',
+        mimetype: 'application/json',
+        caption
+      });
+    } catch (e) {
+      console.error(`Gagal kirim ke owner ${jid}:`, e);
     }
   }
-}, { quoted: qtext });
-if (selectedCategory === 'all') {
-  let soundUrl
-  if (Array.isArray(global.sound)) {
-    if (global.sound.length === 0) return
-    soundUrl = global.sound[Math.floor(Math.random() * global.sound.length)]
-  } else {
-    soundUrl = global.sound
+}
+  break;
+}
+        
+case 'unregister': case 'unreg': {
+  const user = global.db.users[m.sender];
+  if (!user) return m.reply('User tidak ditemukan di database.');
+  if (!user.register) return m.reply('Kamu belum terdaftar.');
+
+  const now = Date.now();
+  const lastUnreg = user.lastunreg;
+  const cooldown = 24 * 60 * 60 * 1000;
+
+  if (lastUnreg && now < lastUnreg + cooldown) {
+    const remaining = lastUnreg + cooldown - now;
+
+    const timeReverse = (ms) => {
+      if (ms < 0) ms = 0;
+      const seconds = Math.floor((ms / 1000) % 60);
+      const minutes = Math.floor((ms / (1000 * 60)) % 60);
+      const hours = Math.floor((ms / (1000 * 60 * 60)) % 24);
+      const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+      return [
+        days ? `${days}D` : '',
+        hours ? `${hours}H` : '',
+        minutes ? `${minutes}M` : '',
+        seconds ? `${seconds}S` : ''
+      ].filter(Boolean).join(' ') || '0S';
+    };
+
+    return m.reply(`Kamu baru bisa unregister lagi dalam waktu ${timeReverse(remaining)}.`);
   }
+
+  user.register = false;
+  user.name = pushname || m.sender.split('@')[0];
+  user.age = 0;
+  user.gender = '';
+  user.lastunreg = now;
+
   await erlic.sendMessage(m.chat, {
-    audio: { url: soundUrl },
-    mimetype: 'audio/mpeg',
-    ptt: true
-  }, { quoted: masthan })
+    text: `✅ Berhasil menghapus data registrasi.`
+  }, { quoted: m });
+
+  break;
 }
+        
+case 'me': {
+  const user = global.db.users[m.sender];
+  if (!user) return m.reply('User tidak ditemukan di database.');
+  const {
+    name,
+    age,
+    gender,
+    limit,
+    balance,
+    level,
+    exp,
+    role,
+    register,
+    banned,
+    premium
+  } = user;
+
+  const warning = user.warning || 0;
+  const expired = {
+    banned: user.expired?.banned,
+    premium: user.expired?.premium
+  };
+  const date = user.registeredAt || '-';
+  const about = (await erlic.fetchStatus(m.sender).catch(_ => {}) || {}).status || '-';
+  const formattedBalance = '$' + new Intl.NumberFormat('id-ID').format(balance || 0);
+  const expNeeded = 10 * Math.pow(level, 2) + 50 * level + 100;
+  const timeReverse = (ms) => {
+    if (typeof ms !== 'number' || ms < 0) return 'Invalid';
+    const seconds = Math.floor((ms / 1000) % 60),
+      minutes = Math.floor((ms / (1000 * 60)) % 60),
+      hours = Math.floor((ms / (1000 * 60 * 60)) % 24),
+      days = Math.floor(ms / (1000 * 60 * 60 * 24));
+    return [
+      days ? `${days}D` : '',
+      hours ? `${hours}H` : '',
+      minutes ? `${minutes}M` : '',
+      seconds ? `${seconds}S` : ''
+    ].filter(Boolean).join(' ') || '0s';
+  };
+
+  const formatExpire = (type) => {
+    if (type === -1) return 'PERMANENT';
+    if (typeof type !== 'number') return '-';
+    return Date.now() > type ? 'EXPIRED' : timeReverse(type - Date.now());
+  };
+
+  let caption = `乂  *U S E R - I N F O*\n\n`;
+  caption += `- *Name:* ${name || '-'}\n`;
+  caption += `- *Gender:* ${gender || '-'}\n`;
+  caption += `- *Age:* ${age || '-'}\n`;
+  caption += `- *Limit:* ${limit || 0}\n`;
+  caption += `- *Balance:* ${formattedBalance}\n`;
+  caption += `- *Level:* ${level || 0}\n`;
+  caption += `- *Exp:* ${exp || 0} / ${expNeeded}\n`;
+  caption += `- *Role:* ${role || 'Beginner'}\n`;
+  caption += `- *About:* ${about}\n\n`;
+  caption += `乂  *U S E R - S T A T U S*\n\n`;
+  caption += `- *Warning:* ${warning} / 3\n`;
+  caption += `- *Banned:* ${banned ? 'Yes (' + (expired.banned === -1 ? 'PERMANENT' : formatExpire(expired.banned)) + ')' : 'No'}\n`;
+  caption += `- *Premium:* ${premium ? 'Yes (' + (expired.premium === -1 ? 'PERMANENT' : formatExpire(expired.premium)) + ')' : 'No'}\n`;
+  caption += `- *Register:* ${register ? 'Yes (' + date + ')' : 'No'}`;
+
+  await erlic.sendMessage(m.chat, {
+    text: caption,
+    contextInfo: {
+      externalAdReply: {
+        title: global.header,
+        body: global.footer,
+        thumbnailUrl: global.db.setting?.cover || global.thumb,
+        sourceUrl: global.db.setting?.link,
+        mediaType: 1,
+        renderLargerThumbnail: true
+      }
+    }
+  }, { quoted: m });
+
+  break;
 }
-break
+        
+ case 'profile':
+case 'profil': {
+  let target = null;
+  if (m.quoted && m.quoted.sender !== m.sender) {
+    target = m.quoted.sender;
+  }
+  else if (m.mentionedJid && m.mentionedJid.length > 0) {
+    const mentioned = m.mentionedJid.find(jid => jid !== m.sender);
+    if (mentioned) target = mentioned;
+  }
+  if (!target) {
+    return m.reply('Reply or mention user.');
+  }
+
+  const user = global.db.users[target];
+  if (!user) {
+    return m.reply('User tidak ditemukan di database.');
+  }
+
+  const {
+    name,
+    age,
+    gender,
+    limit,
+    balance,
+    level,
+    exp,
+    role,
+    register,
+    banned,
+    premium
+  } = user;
+
+  const warning = user.warning || 0;
+  const expired = {
+    banned: user.expired?.banned,
+    premium: user.expired?.premium
+  };
+  const date = user.registeredAt || '-';
+  const about = (await erlic.fetchStatus(target).catch(_ => {}) || {}).status || '-';
+  const formattedBalance = '$' + new Intl.NumberFormat('id-ID').format(balance || 0);
+  const expNeeded = 10 * Math.pow(level, 2) + 50 * level + 100;
+  const timeReverse = (ms) => {
+    if (typeof ms !== 'number' || ms < 0) return 'Invalid';
+    const seconds = Math.floor((ms / 1000) % 60),
+      minutes = Math.floor((ms / (1000 * 60)) % 60),
+      hours = Math.floor((ms / (1000 * 60 * 60)) % 24),
+      days = Math.floor(ms / (1000 * 60 * 60 * 24));
+    return [
+      days ? `${days}D` : '',
+      hours ? `${hours}H` : '',
+      minutes ? `${minutes}M` : '',
+      seconds ? `${seconds}S` : ''
+    ].filter(Boolean).join(' ') || '0s';
+  };
+
+  const formatExpire = (type) => {
+    if (type === -1) return 'PERMANENT';
+    if (typeof type !== 'number') return '-';
+    return Date.now() > type ? 'EXPIRED' : timeReverse(type - Date.now());
+  };
+
+  const pushName = m.quoted?.pushName ||
+                   (m.mentionedJid.includes(target) ? m.name : null) ||
+                   target.split('@')[0];
+
+  let caption = `乂  *U S E R - I N F O*\n\n`;
+  caption += `- *Name:* ${name || pushName}\n`;
+  caption += `- *Gender:* ${gender || '-'}\n`;
+  caption += `- *Age:* ${age || '-'}\n`;
+  caption += `- *Limit:* ${limit || 0}\n`;
+  caption += `- *Balance:* ${formattedBalance}\n`;
+  caption += `- *Level:* ${level || 0}\n`;
+  caption += `- *Exp:* ${exp || 0} / ${expNeeded}\n`;
+  caption += `- *Role:* ${role || 'Beginner'}\n`;
+  caption += `- *About:* ${about}\n\n`;
+  caption += `乂  *U S E R - S T A T U S*\n\n`;
+  caption += `- *Warning:* ${warning} / 3\n`;
+  caption += `- *Banned:* ${banned ? 'Yes (' + (expired.banned === -1 ? 'PERMANENT' : formatExpire(expired.banned)) + ')' : 'No'}\n`;
+  caption += `- *Premium:* ${premium ? 'Yes (' + (expired.premium === -1 ? 'PERMANENT' : formatExpire(expired.premium)) + ')' : 'No'}\n`;
+  caption += `- *Register:* ${register ? 'Yes (' + date + ')' : 'No'}`;
+
+  await erlic.sendMessage(m.chat, {
+    text: caption,
+    contextInfo: {
+      externalAdReply: {
+        title: global.header,
+        body: global.footer,
+        thumbnailUrl: global.db.setting?.cover || global.thumb,
+        sourceUrl: global.db.setting?.link,
+        mediaType: 1,
+        renderLargerThumbnail: true
+      }
+    }
+  }, { quoted: m });
+
+  break;
+}
         
 case 'sampah': {
   if (!isCreator) return m.reply(mess.owner);
@@ -880,10 +1467,10 @@ break;
 case 'autotyping': {
     if (!isCreator) return m.reply(mess.owner);
     if (args[0] === 'on') {
-        global.autotyping = true;
+        setting.autotyping = true;
         m.reply('Successfully changed autotyping to enable.');
     } else if (args[0] === 'off') {
-        global.autotyping = false;
+        setting.autotyping = false;
         m.reply('Successfully changed autotyping to disable.');
     } else {
         m.reply(`Current status: ${isAutotyping ? 'enable' : 'disable'}\n\nExample: ${pripek + cmd} on/off`);
@@ -891,13 +1478,27 @@ case 'autotyping': {
 }
 break;
         
+case 'autolevelup': {
+    if (!isCreator) return m.reply(mess.owner);
+    if (args[0] === 'on') {
+        setting.autolevelup = true;
+        m.reply('Successfully changed autolevelup to enable.');
+    } else if (args[0] === 'off') {
+        setting.autolevelup = false;
+        m.reply('Successfully changed autolevelup to disable.');
+    } else {
+        m.reply(`Current status: ${setting.autolevelup ? 'enable' : 'disable'}\n\nExample: ${pripek + cmd} on/off`);
+    }
+}
+break;
+        
 case 'autorecord': {
     if (!isCreator) return m.reply(mess.owner);
     if (args[0] === 'on') {
-        global.autorecord = true;
+        setting.autorecord = true;
         m.reply('Successfully changed autorecord to enable.');
     } else if (args[0] === 'off') {
-        global.autorecord = false;
+        setting.autorecord = false;
         m.reply('Successfully changed autorecord to disable.');
     } else {
         m.reply(`Current status: ${isAutorecord ? 'enable' : 'disable'}\n\nExample: ${pripek + cmd} on/off`);
@@ -908,10 +1509,10 @@ break;
 case 'antispam': {
     if (!isCreator) return m.reply(mess.owner);
     if (args[0] === 'on') {
-        global.antispam = true;
+        setting.antispam = true;
         m.reply('Successfully changed antispam to enable.');
     } else if (args[0] === 'off') {
-        global.antispam = false;
+        setting.antispam = false;
         m.reply('Successfully changed antispam to disable.');
     } else {
         m.reply(`Current status: ${isAntispam ? 'enable' : 'disable'}\n\nExample: ${pripek + cmd} on/off`);
@@ -922,10 +1523,10 @@ break;
  case 'gconly': {
     if (!isCreator) return m.reply(mess.owner);
     if (args[0] === 'on') {
-        global.gconly = true;
+        setting.gconly = true;
         m.reply('Successfully changed gconly to enable.');
     } else if (args[0] === 'off') {
-        global.gconly = false;
+        setting.gconly = false;
         m.reply('Successfully changed gconly to disable.');
     } else {
         m.reply(`Current status: ${isGconly ? 'enable' : 'disable'}\n\nExample: ${pripek + cmd} on/off`);
@@ -936,8 +1537,8 @@ break;
 case 'online':
 case 'offline': {
     if (!isCreator) return m.reply(mess.owner);
-    global.online = command === 'online';
-    m.reply(`Successfully changed status to ${global.online ? 'online (available)' : 'offline (unavailable)'}.`);
+    setting.online = command === 'online';
+    m.reply(`Successfully changed status to ${setting.online ? 'online (available)' : 'offline (unavailable)'}.`);
 }
 break;
         
@@ -1037,6 +1638,7 @@ case 'status': {
 break;
         
 case 'dashboard':case 'dash':{const fs=require('fs'),path=require('path'),axios=require('axios'),moment=require('moment'),dirPath='./database',logPath=`${dirPath}/command-logs.json`,sessionPath='./session',sessionFiles=fs.existsSync(sessionPath)?fs.readdirSync(sessionPath):[],getFolderSize=path=>fs.existsSync(path)?fs.readdirSync(path).reduce((total,file)=>total+fs.statSync(`${path}/${file}`).size,0):0;if(!fs.existsSync(dirPath))fs.mkdirSync(dirPath);if(!fs.existsSync(logPath))fs.writeFileSync(logPath,JSON.stringify([]));const logs=JSON.parse(fs.readFileSync(logPath));let count={};logs.forEach(item=>{count[item.cmd]=count[item.cmd]||{hit:0,lastused:0};count[item.cmd].hit++;if(item.time>(count[item.cmd].lastused||0))count[item.cmd].lastused=item.time;});let topFitur=Object.entries(count).sort((a,b)=>b[1].hit-a[1].hit);const caption=`乂  *DASHBOARD ${global.botname.toUpperCase()} BOT*\n\n⭝ Runtime : ${func.clockString(process.uptime()*1000)}\n⭝ System OS : ${process.platform} ${process.arch}\n⭝ Nodejs Version : ${process.version}\n⭝ Total Session : ${sessionFiles.length} Files\n⭝ Size Session : ${(getFolderSize(sessionPath)/1024).toFixed(2)} KB\n⭝ Size Database : ${(getFolderSize('./database')/1024).toFixed(2)} KB\n⭝ Ram Used Bot : ${(process.memoryUsage().rss/1024/1024).toFixed(2)} MB\n⭝ Max Ram Server : ${process.env.SERVER_MEMORY&&parseInt(process.env.SERVER_MEMORY)>0?process.env.SERVER_MEMORY+' MB':'∞'}\n⭝ Time Server : ${process.env.TZ??'-'}\n⭝ Location Server : ${process.env.P_SERVER_LOCATION??'-'}\n⭝ Total Sampah : ${fs.readdirSync('./sampah').filter(v=>['gif','png','mp3','m4a','opus','mp4','jpg','jpeg','webp','webm'].some(x=>v.endsWith(x))).length} Sampah`;let thumb=null;try{const res=await axios.get(global.thumb,{responseType:'arraybuffer'});thumb=res.data}catch(e){console.error('[ERROR] Thumbnail gagal diambil:',e);}await erlic.sendMessage(m.chat,{text:caption,contextInfo:{externalAdReply:{title:global.header,body:global.footer,sourceUrl:global.link,mediaType:1,renderLargerThumbnail:true,thumbnailUrl:global.thumb,jpegThumbnail:thumb}}},{quoted:m});}break;    
+
 case 'getpp': case 'getprofile': {
 let raw = (args[0] || '').replace(/[^0-9]/g, '')
 let inputJid = raw
@@ -1225,10 +1827,10 @@ break;
 case 'autobio': {
     if (!isCreator) return m.reply(mess.owner);
     if (args[0] === 'on') {
-        global.autobio = true;
+        setting.autobio = true;
         m.reply('Successfully changed autobio to enable.');
     } else if (args[0] === 'off') {
-        global.autobio = false;
+        setting.autobio = false;
         m.reply('Successfully changed autobio to disable.');
     } else {
         m.reply(`Current status: ${isAutobio ? 'enable' : 'disable'}\n\nExample: ${prefix}autobio on/off`);
@@ -1239,10 +1841,10 @@ break;
 case 'autoread': {
     if (!isCreator) return m.reply(mess.owner);
     if (args[0] === 'on') {
-        global.autoread = true;
+        setting.autoread = true;
         m.reply('Successfully changed autoread to enable.');
     } else if (args[0] === 'off') {
-        global.autoread = false;
+        setting.autoread = false;
         m.reply('Successfully changed autoread to disable.');
     } else {
         m.reply(`Current status: ${isAutoread ? 'enable' : 'disable'}\n\nExample: ${prefix}autoread on/off`);
@@ -2539,7 +3141,7 @@ case "jpmch": case "jpmallch": {
     } catch (err) {
       console.log(`Gagal kirim ke ${i}:`, err.message);
     }
-    await sleep(global.delayJpm);
+    await sleep(setting.delayJpm);
   }
   await erlic.sendMessage(jid, {
     text: `Jpmch *${opsijpm}* berhasil dikirim ke ${count} channel`
@@ -2560,7 +3162,7 @@ break;
         const media = await quoted.download();
         const result = await upload(media);
         if (!result.status) return m.reply(result.message);
-        global.thumb = result.url;
+        setting.cover = result.url;
         await erlic.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
         m.reply(`Cover bot berhasil diperbarui!\n\nURL: ${result.url}`);
     } catch (e) {
@@ -2578,7 +3180,7 @@ break
     return m.reply(func.example(cmd, 'https://example.com'));
   }
   if (global.link === link) return m.reply('Link already this.');
-  global.link = link;
+  setting.link = link;
   m.reply('Link berhasil diperbarui!');
 }
 break;
@@ -2619,9 +3221,9 @@ case 'setwm': case 'setwatermark': {
   author = author?.trim();
   if (packname === "''") packname = '';
   if (author === "''") author = '';
-  if (packname !== undefined) global.packname = packname;
-  if (author !== undefined) global.author = author;
-  m.reply(`Watermark berhasil diperbarui sebagai template!\n${packname !== undefined ? `• Packname: ${global.packname || '(kosong)'}` : ''}${author !== undefined ? `\n• Author: ${global.author || '(kosong)'}` : ''}`);
+  if (packname !== undefined) setting.packname = packname;
+  if (author !== undefined) setting.author = author;
+  m.reply(`Watermark berhasil diperbarui sebagai template!\n${packname !== undefined ? `• Packname: ${setting.packname || '(kosong)'}` : ''}${author !== undefined ? `\n• Author: ${setting.author || '(kosong)'}` : ''}`);
 }
 break;
         
@@ -2720,8 +3322,8 @@ case 'setfont': {
     const { yStr } = require('./system/font.js');
     const totalFont = Object.keys(yStr).length;
     if (!yStr[num]) return m.reply(`Font tidak tersedia. Gunakan angka 1 - ${totalFont}`);
-    global.font = num;
-    m.reply(styles('Teks di menu akan terlihat seperti ini.', global.font));
+    setting.style = num;
+    m.reply(styles('Teks di menu akan terlihat seperti ini.', setting.style));
   } catch (e) {
     console.error(e);
     m.reply(mess.error);
@@ -3466,46 +4068,123 @@ case 'blurface': {
   break;
 }
         
-case 'hd': case 'upscale': case 'remini': {
-  const quoted = m.quoted ? m.quoted : m;
+case 'hd':
+case 'upscale':
+case 'remini': {
+    const quoted = m.quoted ? m.quoted : m;
     const mime = (quoted.msg || quoted).mimetype || '';
     if (!quoted || !mime || !/image/.test(mime)) {
-    return m.reply(`Balas gambar dengan caption ${prefix + cmd}`);
-  }
+        return m.reply(`Balas gambar dengan caption ${setting.prefix + command}`);
+    }
 
-  try {
-    await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
+    try {
+        await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
 
-    const media = await quoted.download?.();
+       
+        const media = await quoted.download();
+        if (!media) throw new Error('Gagal download gambar');
 
-    const FormData = require('form-data');
-    const form = new FormData();
-    form.append('reqtype', 'fileupload');
-    let ext = mime.split('/')[1] || '';
-    if (ext) ext = `.${ext}`;
-    form.append('fileToUpload', media, `file${ext}`);
+        
+        const FormData = require('form-data');
+        const form = new FormData();
+        form.append('reqtype', 'fileupload');
+        const ext = mime.split('/')[1] || 'jpg';
+        form.append('fileToUpload', media, `image.${ext}`);
 
-    const upload = await axios.post('https://catbox.moe/user/api.php', form, {
-      headers: form.getHeaders()
-    });
+        const upload = await axios.post('https://catbox.moe/user/api.php', form, {
+            headers: form.getHeaders()
+        });
 
-    const imageUrl = upload.data.trim();
+        const imageUrl = upload.data.trim();
+        if (!imageUrl) throw new Error('Upload ke catbox gagal');
 
-    const upscale = await axios.get(`https://api.siputzx.my.id/api/iloveimg/upscale?image=${encodeURIComponent(imageUrl)}`, {
-      responseType: 'arraybuffer'
-    });
+        let resultUrl = null;
 
-    await erlic.sendMessage(m.chat, {
-      image: Buffer.from(upscale.data, 'binary'),
-      caption: mess.ok
-    }, { quoted: m });
+        
+        const getFinalUrl = (data) => {
+            if (typeof data === 'string') return data.trim();
+            if (data?.result?.result?.result_url) return data.result.result.result_url.trim();
+            if (data?.result) return data.result.trim();
+            if (data?.result?.data?.downloadUrls?.[0]) return data.result.data.downloadUrls[0].trim();
+            return null;
+        };
 
-  } catch (e) {
-    console.error(e);
-    m.reply(mess.error);
-  }
+      
+        try {
+            const res1 = await axios.get(`https://api.siputzx.my.id/api/iloveimg/upscale?image=${encodeURIComponent(imageUrl)}`, {
+                responseType: 'arraybuffer',
+                timeout: 15000
+            });
+            if (res1?.data?.byteLength > 1000) {
+                resultUrl = Buffer.from(res1.data, 'binary');
+            }
+        } catch (e) {
+            console.log('API 1 (siputzx) gagal:', e.message);
+        }
 
-  break;
+      
+        if (!resultUrl) {
+            try {
+                const res2 = await axios.get(`https://www.apis-anomaki.zone.id/ai/ai-upscale?imageUrl=${encodeURIComponent(imageUrl)}`);
+                resultUrl = getFinalUrl(res2.data);
+            } catch (e) {
+                console.log('API 2 (anomaki v1) gagal:', e.message);
+            }
+        }
+
+       
+        if (!resultUrl) {
+            try {
+                const res3 = await axios.get(`https://www.apis-anomaki.zone.id/ai/ai-upscale2?imageUrl=${encodeURIComponent(imageUrl)}`);
+                resultUrl = getFinalUrl(res3.data);
+            } catch (e) {
+                console.log('API 3 (anomaki v2) gagal:', e.message);
+            }
+        }
+
+        
+        if (!resultUrl) {
+            try {
+                const res4 = await axios.get(`https://api.vreden.my.id/api/artificial/hdr?url=${encodeURIComponent(imageUrl)}&pixel=4`);
+                resultUrl = getFinalUrl(res4.data);
+            } catch (e) {
+                console.log('API 4 (vreden) gagal:', e.message);
+            }
+        }
+
+        
+        if (!resultUrl) {
+            try {
+                const remini = require('./system/remini');
+                resultUrl = await remini.remini(media); 
+                if (!resultUrl) throw new Error('Remini fallback gagal');
+            } catch (e) {
+                console.error('Fallback Remini gagal:', e.message);
+            }
+        }
+
+        
+        if (resultUrl) {
+            const sentMsg = await erlic.sendMessage(m.chat, {
+                image: typeof resultUrl === 'string' ? { url: resultUrl } : resultUrl,
+                caption: global.mess?.ok || '✅ Gambar berhasil ditingkatkan!'
+            }, { quoted: m });
+
+       
+            setTimeout(() => {
+                erlic.sendMessage(m.chat, { delete: sentMsg.key }).catch(() => null);
+            }, 1000 * 60);
+
+        } else {
+            await m.reply('Maaf, semua layanan upscale gagal. Coba lagi nanti.');
+        }
+
+    } catch (e) {
+        console.error('Upscale Error:', e);
+        m.reply(global.mess?.error || 'Terjadi kesalahan saat memproses gambar.');
+    }
+
+    break;
 }
         
 case 'compress': {
@@ -3892,7 +4571,8 @@ break
 }
 break
         
-case 'banned': case 'ban': {
+case 'banned':
+case 'ban': {
     if (!isCreator) return m.reply(mess.owner);
     if (!text && !m.quoted) return m.reply(func.example(cmd, '628xxxx,10d'));
 
@@ -3900,59 +4580,49 @@ case 'banned': case 'ban': {
     let usersToBanned = [];
 
     if (m.quoted) {
-        const quotedJid = m.quoted.sender;
-        usersToBanned.push(formatJid(quotedJid));
+        usersToBanned.push(formatJid(m.quoted.sender));
     } else {
         const [numberRaw, durationInput] = text.split(',');
         if (!numberRaw) return m.reply(func.example(cmd, '628xxxx,10d'));
         const textNumbers = numberRaw.split(/[\s,]+/).map(no => no.replace(/\D/g, ''));
-        usersToBanned = textNumbers.map(formatJid);
+        usersToBanned = textNumbers.map(no => formatJid(no + '@s.whatsapp.net'));
     }
+
     usersToBanned = [...new Set(usersToBanned)];
+
     usersToBanned = usersToBanned.filter(jid =>
-        jid !== erlic.user.id &&
-        !(Array.isArray(global.owner) ? global.owner : [global.owner]).some(own => formatJid(own) === jid) &&
-        !(Array.isArray(global.prems) ? global.prems : [global.prems]).some(prem => formatJid(prem) === jid) &&
-        !(Array.isArray(global.developer) ? global.developer : [global.developer]).some(dev => formatJid(dev) === jid)
+        jid !== (erlic.user.id.split(':')[0] + '@s.whatsapp.net') &&
+        !global.owner.some(own => formatJid(own) === jid) &&
+        !global.developer?.some(dev => formatJid(dev) === jid)
     );
+
     if (usersToBanned.length === 0) return m.reply('Tidak ada nomor valid untuk dibanned.');
-    let bannedUntil;
+
     function parseDuration(input) {
-        const match = input?.match(/^(\d+)([smhdy])$/i);
+        const match = input?.trim().match(/^(\d+)([smhdy])$/i);
         if (!match) return null;
         const value = parseInt(match[1]);
         const unit = match[2].toLowerCase();
         const multipliers = {
             s: 1000,
             m: 60 * 1000,
-            h: 60 * 60 * 1000,
-            d: 24 * 60 * 60 * 1000,
-            y: 365 * 24 * 60 * 60 * 1000
+            h: 3600 * 1000,
+            d: 86400 * 1000,
+            y: 31536000 * 1000
         };
         return value * (multipliers[unit] || 0);
     }
 
-    const durationInput = text && !m.quoted ? text.split(',')[1] : null;
-    if (!durationInput) {
-        bannedUntil = -1;
-    } else {
-        const ms = parseDuration(durationInput);
-        if (!ms) return m.reply(`Format durasi tidak valid. Gunakan akhiran: s, m, h, d, y\nContoh: 10m, 5d, 1y`);
-        bannedUntil = Date.now() + ms;
-    }
-    const bannedFile = './database/banned.json';
-    if (!fs.existsSync(bannedFile)) fs.writeFileSync(bannedFile, '[]');
-    let banned = JSON.parse(fs.readFileSync(bannedFile));
+    const durationInput = !m.quoted && text ? text.split(',')[1] : null;
+    const bannedUntil = !durationInput ? -1 : parseDuration(durationInput) ? Date.now() + parseDuration(durationInput) : -1;
+    
     for (const jid of usersToBanned) {
-        const index = banned.findIndex(entry => entry.id === jid);
-        if (index !== -1) {
-            banned[index].until = bannedUntil;
-        } else {
-            banned.push({ id: jid, until: bannedUntil });
-        }
+        if (!global.db.users[jid]) global.db.users[jid] = {};
+        const user = global.db.users[jid];
+        user.banned = true;
+        user.expired = user.expired || {};
+        user.expired.banned = bannedUntil;
     }
-
-    fs.writeFileSync(bannedFile, JSON.stringify(banned, null, 2));
     await erlic.sendMessage(m.chat, {
         text: `Berhasil banned:\n${usersToBanned.map(j => `@${j.split('@')[0]}`).join('\n')}\nSampai: ${bannedUntil === -1 ? 'PERMANEN' : new Date(bannedUntil).toLocaleString()}`,
         mentions: usersToBanned
@@ -3960,90 +4630,99 @@ case 'banned': case 'ban': {
     break;
 }
         
-case 'unbanned': case 'unban': {
+case 'unbanned':
+case 'unban': {
     if (!isCreator) return m.reply(mess.owner);
+    if (!text && !m.quoted) return m.reply(`Tag atau kirim nomor yang ingin di-unban.\nContoh: ${func.example(cmd, '628xxxx')}`);
 
-    if (!text) return m.reply(`Tag atau kirim nomor yang ingin di-unban.\nContoh: ${func.example(cmd, '628xxxx')}`);
+    const formatJid = (jid) => (jid.includes('@') ? jid : jid + '@s.whatsapp.net');
+    const target = m.quoted ? m.quoted.sender : formatJid(text.replace(/[^0-9]/g, ''));
+
+    if (!global.db.users[target]) {
+        return m.reply('User tidak ditemukan dalam database.');
+    }
+
+    const user = global.db.users[target];
     
-    const target = (m.quoted ? m.quoted.sender : text.replace(/[^0-9]/g, '') + '@s.whatsapp.net');
-
-    const bannedFile = './database/banned.json';
-    if (!fs.existsSync(bannedFile)) fs.writeFileSync(bannedFile, '[]');
-    let banned = JSON.parse(fs.readFileSync(bannedFile));
-
-    const isBanned = banned.find(u => u.id === target);
-    if (!isBanned) return m.reply('User tidak dalam daftar banned.');
-
-    banned = banned.filter(u => u.id !== target);
-    fs.writeFileSync(bannedFile, JSON.stringify(banned, null, 2));
-
-    const targetNumber = target.split('@')[0];
-    erlic.sendMessage(m.chat, {
-        text: `Berhasil unban @${targetNumber}`,
+    if (!user.banned) {
+        return m.reply('User ini tidak sedang dibanned.');
+    }
+    user.banned = false;
+    user.expired = user.expired || {};
+    user.expired.banned = null;
+    
+    await erlic.sendMessage(m.chat, {
+        text: `Berhasil unban @${target.split('@')[0]}`,
         mentions: [target]
     }, { quoted: m });
+    break;
 }
-break
         
-case 'listbanned': case 'listban': {
-  cleanExpiredBanned();
-  const banned = JSON.parse(fs.readFileSync('./database/banned.json'));
-  if (banned.length === 0) return m.reply('Tidak ada user yang dibanned.');
-  let list = `乂 *L I S T - B A N N E D*\n\n`;
-  banned.forEach((b, i) => {
-    let expireText;
-    if (b.until === -1) {
-      expireText = 'PERMANENT';
-    } else {
-      let sisa = b.until - Date.now();
-      if (sisa < 0) sisa = 0;
-      expireText = parseMs(sisa);
-    }
-    list += `${i + 1}. @${b.id.replace(/@.+/, '')}\n◦ Expire: ${expireText}\n\n`;
-  });
-  erlic.sendMessage(m.chat, {
-    text: list.trim(),
-    mentions: banned.map(b => b.id)
-  }, { quoted: m });
+case 'listbanned':
+case 'listban': {
+    if (!isCreator) return m.reply(mess.owner);
+    const now = Date.now();
+    const bannedUsers = Object.entries(global.db.users)
+        .filter(([jid, user]) => user.banned && user.expired?.banned !== null)
+        .map(([jid, user]) => {
+            const expired = user.expired.banned;
+            let expireText;
+            if (expired === -1) {
+                expireText = 'PERMANENT';
+            } else if (expired > now) {
+                const sisa = expired - now;
+                const { days, hours, minutes, seconds } = parseMs(sisa);
+                expireText = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+            } else {
+                expireText = 'EXPIRED';
+            }
+            return { jid, expireText };
+        })
+        .filter(b => b.expireText !== 'EXPIRED'); 
+    if (bannedUsers.length === 0) return m.reply('Tidak ada user yang sedang dibanned.');
+
+    let list = `乂  *L I S T - B A N N E D*\n\n`;
+    bannedUsers.forEach((b, i) => {
+        list += `${i + 1}. @${b.jid.split('@')[0]}\n◦ Expire: ${b.expireText}\n\n`;
+    });
+
+    await erlic.sendMessage(m.chat, {
+        text: list.trim(),
+        mentions: bannedUsers.map(b => b.jid)
+    }, { quoted: m });
+    break;
 }
-break;
         
 case 'blockcmd': {
   if (!text) return m.reply(func.example(command, 'play'));
-  const blocked = JSON.parse(fs.readFileSync('./database/blockcmd.json'));
-
+  if (!global.db.setting.blockcmd) global.db.setting.blockcmd = [];
+  const blocked = global.db.setting.blockcmd;
   if (blocked.includes(text)) return m.reply(`Command *${text}* sudah diblokir.`);
-
   blocked.push(text);
-  fs.writeFileSync('./database/blockcmd.json', JSON.stringify(blocked, null, 2));
   m.reply(`Command *${text}* berhasil diblokir.`);
 }
 break;
 
 case 'unblockcmd': {
   if (!text) return m.reply(func.example(command, 'play'));
-  let blocked = JSON.parse(fs.readFileSync('./database/blockcmd.json'));
-
+  if (!global.db.setting.blockcmd) global.db.settings.blockcmd = [];
+  const blocked = global.db.setting.blockcmd;
   if (!blocked.includes(text)) return m.reply(`Command *${text}* tidak sedang diblokir.`);
-
-  blocked = blocked.filter(cmd => cmd !== text);
-  fs.writeFileSync('./database/blockcmd.json', JSON.stringify(blocked, null, 2));
+  global.db.setting.blockcmd = blocked.filter(cmd => cmd !== text);
   m.reply(`Command *${text}* berhasil dibuka.`);
 }
 break;
-        
+
 case 'listblockcmd': {
-  const blocked = JSON.parse(fs.readFileSync('./database/blockcmd.json'));
-
+  if (!global.db.setting.blockcmd) global.db.setting.blockcmd = [];
+  const blocked = global.db.setting.blockcmd;
   if (blocked.length === 0) return m.reply('Tidak ada command yang diblokir.');
-
   let list = `乂  *LIST BLOCK COMMANDS*\n\n`;
   list += `Total: *${blocked.length}* commands blocked\n\n`;
   list += blocked.map(cmd => `◦  ${prefix}${cmd}`).join('\n');
-
   m.reply(list);
 }
-break
+break;
         
 case 'addfitur': {
   if (!text.includes('|')) return m.reply(func.example(cmd, 'kategori|fitur1, fitur2, ...'));
@@ -5959,30 +6638,68 @@ case 'setprefix': {
  const newPrefix = text.trim();
  prefixDB.prefix = [newPrefix];
  fs.writeFileSync('./database/prefix.json', JSON.stringify(prefixDB, null, 2));
- global.customPrefix = prefixDB.prefix;
+ setting.prefix = prefixDB.prefix;
  m.reply(`Prefix berhasil diubah menjadi: \`${newPrefix}\``).then(() => {
     process.send('reset');
   });
 }
 break
         
-case 'addprem':{if(!isCreator)return m.reply(mess.owner);const fs=require('fs'),path=require('path'),dir='./database',file=path.join(dir,'premium.json');if(!fs.existsSync(dir))fs.mkdirSync(dir);const id=(m.quoted?m.quoted.sender:(text?.split(',')[0]||'')).replace(/[^0-9]/g,''),waktu=text?.includes(',')?text.split(',')[1]:null,waktuMs=waktu?ms(waktu):ms('10000d');if(!text&&!m.quoted)return erlic.sendMessage(m.chat,{text:func.example(cmd,'628xxxxxx,10d')},{quoted:m});if(waktu&&waktuMs===undefined)return m.reply('Waktu tidak valid. Gunakan s, m, h, d, mo, y.');const expired=Date.now()+waktuMs,premium=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):[ ];if(premium.some(u=>u.id===id))return m.reply('User sudah premium.');premium.push({id,expired});fs.writeFileSync(file,JSON.stringify(premium,null,2));erlic.sendMessage(m.chat,{text:`Berhasil menambahkan @${id} sebagai user premium selama ${parseMs(waktuMs)}`,contextInfo:{mentionedJid:[id+'@s.whatsapp.net']}},{quoted:m});}
-break;
-
-case 'delprem': case 'delpremium': {if(!isCreator)return m.reply(mess.owner);const fs=require('fs'),path='./database/premium.json',ids=(m.quoted?[m.quoted.sender]:text?text.split(','):[]).map(v=>v.replace(/[^0-9]/g,''));if(!ids.length)return erlic.sendMessage(m.chat,{text:func.example(cmd,'628xxxxxx,628xxxxxx')},{quoted:m});let premium=fs.existsSync(path)?JSON.parse(fs.readFileSync(path)):[{}];const awal=premium.length;premium=premium.filter(user=>!ids.includes(user.id));const sukses=awal-premium.length;if(!sukses)return m.reply('Tidak ada user premium yang ditemukan.');fs.writeFileSync(path,JSON.stringify(premium,null,2));erlic.sendMessage(m.chat,{text:`Berhasil menghapus ${sukses} user premium:\n${ids.map(v=>`@${v}`).join('\n')}`,contextInfo:{mentionedJid:ids.map(v=>v+'@s.whatsapp.net')}},{quoted:m});}
-break;
-
-case 'listpremium': case 'listprem': {
- cleanExpiredPremium();
- if (premium.length === 0) return m.reply('Tidak ada user premium.');
- let list = `乂 *L I S T - P R E M I U M*\n\n`;
- premium.forEach((p, i) => {
- const sisa = p.expired - Date.now();
- list += `${i + 1}. @${p.id}\n◦ Expire: ${parseMs(sisa)}\n\n`;
- });
- erlic.sendMessage(m.chat, { text: list.trim(), mentions: premium.map(p => p.id + '@s.whatsapp.net') }, { quoted: m });
+case 'addprem': {
+  if (!isCreator) return m.reply(mess.owner);
+  const id = (m.quoted ? m.quoted.sender : (text?.split(',')[0] || '')).replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+  const waktu = text?.includes(',') ? text.split(',')[1] : null;
+  const waktuMs = waktu ? ms(waktu) : ms('10000d');
+  if (!text && !m.quoted) return erlic.sendMessage(m.chat, { text: func.example(cmd, '628xxxxxx,10d') }, { quoted: m });
+  if (waktu && !waktuMs) return m.reply('Waktu tidak valid. Gunakan s, m, h, d, mo, y.');
+  if (!global.db.users[id]) global.db.users[id] = {};
+  const user = global.db.users[id];
+  user.premium = true;
+  user.expired = user.expired || {};
+  user.expired.premium = Date.now() + waktuMs;
+  erlic.sendMessage(m.chat, { text: `Berhasil menambahkan @${id.split('@')[0]} sebagai user premium selama ${parseMs(waktuMs)}`, contextInfo: { mentionedJid: [id] } }, { quoted: m });
 }
-break
+break;
+
+case 'delprem':
+case 'delpremium': {
+  if (!isCreator) return m.reply(mess.owner);
+  const ids = (m.quoted ? [m.quoted.sender] : text ? text.split(',') : [])
+    .map(v => v.replace(/[^0-9]/g, '') + '@s.whatsapp.net')
+    .filter(Boolean);
+  if (!ids.length) return erlic.sendMessage(m.chat, { text: func.example(cmd, '628xxxxxx,628xxxxxx') }, { quoted: m });
+  const sukses = [];
+  for (const jid of ids) {
+    const user = global.db.users[jid];
+    if (user && user.premium) {
+      user.premium = false;
+      user.expired = user.expired || {};
+      user.expired.premium = null;
+      sukses.push(jid);
+    }
+  }
+  if (!sukses.length) return m.reply('Tidak ada user premium yang ditemukan.');
+  erlic.sendMessage(m.chat, { text: `Berhasil menghapus ${sukses.length} user premium:\n${sukses.map(v => `@${v.split('@')[0]}`).join('\n')}`, contextInfo: { mentionedJid: sukses } }, { quoted: m });
+}
+break;
+
+case 'listpremium':
+case 'listprem': {
+  const now = Date.now();
+  const premiumUsers = Object.entries(global.db.users)
+    .filter(([jid, user]) => user.premium && user.expired?.premium && user.expired.premium > now)
+    .map(([jid, user]) => {
+      const sisa = user.expired.premium - now;
+      return { jid, sisa };
+    });
+  if (premiumUsers.length === 0) return m.reply('Tidak ada user premium.');
+  let list = `乂 *L I S T - P R E M I U M*\n\n`;
+  premiumUsers.forEach((p, i) => {
+    list += `${i + 1}. @${p.jid.split('@')[0]}\n◦ Expire: ${parseMs(p.sisa)}\n\n`;
+  });
+  erlic.sendMessage(m.chat, { text: list.trim(), mentions: premiumUsers.map(p => p.jid) }, { quoted: m });
+}
+break;
         
 case 'clearsession': {
  if (!isCreator) return m.reply(mess.owner);
@@ -6008,76 +6725,52 @@ case 'pin': {
   if (!text) return erlic.sendMessage(m.chat, { text: func.example(cmd, 'anime') }, { quoted: m });
   await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
 
-  try {
-    const baileys = require('@whiskeysockets/baileys');
-    const generateWAMessageFromContent = baileys.generateWAMessageFromContent;
-    const prepareWAMessageMedia = baileys.prepareWAMessageMedia;
-    const proto = baileys.proto;
+  const axios = require('axios');
+  const query = encodeURIComponent(text.trim());
 
-    const axios = require('axios');
-    const apiUrl = `https://api.siputzx.my.id/api/s/pinterest?query=${encodeURIComponent(text)}`;
-    const { data } = await axios.get(apiUrl);
+  // === Hanya gunakan API Anomaki ===
+  const apiUrl = `https://www.apis-anomaki.zone.id/search/pinsearch?query=${query}`;
+  const response = await axios.get(apiUrl).catch(() => null);
+  const data = response?.data;
 
-    if (!data.status || !data.data || data.data.length === 0) return m.reply('Gambar tidak ditemukan.');
+  let imageUrls = [];
 
-    const results = isPrem ? data.data.slice(0, 10) : data.data.slice(0, 1);
-    if (isPrem) m.reply(`Ditemukan ${results.length} gambar, sedang mengirim...`);
-
-    let cards = [];
-
-    for (let i = 0; i < results.length; i++) {
-      let image = await prepareWAMessageMedia({ image: { url: results[i].images_url } }, { upload: erlic.waUploadToServer });
-
-      cards.push({
-        header: proto.Message.InteractiveMessage.Header.fromObject({
-          title: `Result #${i + 1}`,
-          hasMediaAttachment: true,
-          ...image
-        }),
-        nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.fromObject({
-          buttons: [{
-            name: "cta_url",
-            buttonParamsJson: JSON.stringify({
-              display_text: "View Image",
-              url: results[i].images_url,
-              merchant_url: results[i].images_url
-            })
-          }]
-        })
-      });
-    }
-
-    const msgSlide = await generateWAMessageFromContent(m.chat, {
-      ephemeralMessage: {
-        message: {
-          messageContextInfo: {
-            deviceListMetadata: {},
-            deviceListMetadataVersion: 2
-          },
-          interactiveMessage: proto.Message.InteractiveMessage.fromObject({
-            body: proto.Message.InteractiveMessage.Body.fromObject({ text: `Result for *${text}*` }),
-            contextInfo: { mentionedJid: [m.sender] },
-            carouselMessage: proto.Message.InteractiveMessage.CarouselMessage.fromObject({ cards })
-          })
-        }
-      }
-    }, { userJid: m.chat, quoted: m });
-
-    await erlic.relayMessage(m.chat, msgSlide.message, { messageId: msgSlide.key.id });
-    await erlic.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
-
-  } catch (err) {
-    console.error(err);
-    m.reply(mess.error);
+  // Cek apakah respons valid
+  if (data?.status && Array.isArray(data.result)) {
+    imageUrls = data.result
+      .map(url => (url || '').trim())                  // Pastikan bukan null/undefined, lalu trim
+      .filter(url => url && url.startsWith('http'));  // Hanya URL valid yang dimasukkan
   }
+
+  // Jika tidak ada gambar
+  if (imageUrls.length === 0) {
+    await m.reply('Gambar tidak ditemukan. Coba kata kunci lain.');
+    break;
+  }
+
+  // Batasi jumlah hasil
+  const results = isPrem ? imageUrls.slice(0, 10) : [imageUrls[0]];
+
+  // Kirim satu per satu
+  for (let i = 0; i < results.length; i++) {
+    const url = results[i];
+    const caption = i === 0 ? `Result for \`${text}\`` : null;
+
+    await erlic.sendMessage(m.chat, {
+      image: { url: url },
+      caption: caption
+    }, { quoted: m });
+  }
+
+  await erlic.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
   break;
 }
         
-case 'quickchat': case 'qc': { let colors = ["#000000", "#ff2414", "#22b4f2", "#eb13f2"]; let profilePicUrl; try { profilePicUrl = await erlic.profilePictureUrl(m.quoted ? m.quoted.sender : m.sender, 'image'); } catch (err) { profilePicUrl = 'https://telegra.ph/file/320b066dc81928b782c7b.png'; } let inputText = text || (m.quoted && m.quoted.text) || ''; if (!inputText) return erlic.sendMessage(m.chat, { text: func.example(cmd, `${global.botname} md`) }, { quoted: m }); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const quoteData = { type: "quote", format: "png", backgroundColor: "#ffffff", width: 512, height: 768, scale: 2, messages: [{ entities: [], avatar: true, from: { id: 1, name: m.pushName, photo: { url: profilePicUrl } }, text: inputText, replyMessage: {} }] }; try { const response = await axios.post('https://bot.lyo.su/quote/generate', quoteData, { headers: { 'Content-Type': 'application/json' } }); const stickerPackName = applyWatermarkVars(global.packname, m.pushName || 'Sticker by erlic'); const stickerAuthor = applyWatermarkVars(global.author, m.pushName || ''); const imageBuffer = Buffer.from(response.data.result.image, 'base64'); const sticker = new Sticker(imageBuffer, { pack: stickerPackName, author: stickerAuthor, id: 'https://instagram.com/arxhillie', type: StickerTypes.FULL }); const stickerBuffer = await sticker.toBuffer(); await erlic.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m }); } catch (error) { console.error(error); m.reply(mess.errorstc); } } break;
+case 'quickchat': case 'qc': { let colors = ["#000000", "#ff2414", "#22b4f2", "#eb13f2"]; let profilePicUrl; try { profilePicUrl = await erlic.profilePictureUrl(m.quoted ? m.quoted.sender : m.sender, 'image'); } catch (err) { profilePicUrl = 'https://telegra.ph/file/320b066dc81928b782c7b.png'; } let inputText = text || (m.quoted && m.quoted.text) || ''; if (!inputText) return erlic.sendMessage(m.chat, { text: func.example(cmd, `${global.botname} md`) }, { quoted: m }); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const quoteData = { type: "quote", format: "png", backgroundColor: "#ffffff", width: 512, height: 768, scale: 2, messages: [{ entities: [], avatar: true, from: { id: 1, name: m.pushName, photo: { url: profilePicUrl } }, text: inputText, replyMessage: {} }] }; try { const response = await axios.post('https://bot.lyo.su/quote/generate', quoteData, { headers: { 'Content-Type': 'application/json' } }); const stickerPackName = applyWatermarkVars(setting.packname, m.pushName || 'Sticker by erlic'); const stickerAuthor = applyWatermarkVars(setting.author, m.pushName || ''); const imageBuffer = Buffer.from(response.data.result.image, 'base64'); const sticker = new Sticker(imageBuffer, { pack: stickerPackName, author: stickerAuthor, id: 'https://instagram.com/arxhillie', type: StickerTypes.FULL }); const stickerBuffer = await sticker.toBuffer(); await erlic.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m }); } catch (error) { console.error(error); m.reply(mess.errorstc); } } break;
         
-case 'brat': { let inputText = text || (m.quoted && m.quoted.text) || ''; if (!inputText) return erlic.sendMessage(m.chat, { text: func.example(cmd, `${global.botname} md`)}, { quoted: m }); if (inputText.length > 250) return m.reply('Maksimal 250 karakter.'); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); try { let packname = applyWatermarkVars(global.packname, m.pushName || 'Sticker by erlic'); let author = applyWatermarkVars(global.author, m.pushName || ''); let natdim = `https://brat.caliphdev.com/api/brat?text=${encodeURIComponent(inputText)}`; let dimas = await axios.get(natdim, { responseType: 'arraybuffer' }); let s = new Sticker(dimas.data, { pack: packname, author: author, type: StickerTypes.FULL, id: 'https://instagram.com/arxhillie' }); let nathan = await s.toBuffer(); await erlic.sendMessage(m.chat, { sticker: nathan }, { quoted: m }); } catch (err) { console.error(err); m.reply(mess.errorstc); } } break;
+case 'brat': { let aA=text||(m.quoted&&m.quoted.text)||''; if(!aA) return erlic.sendMessage(m.chat,{text:func.example(cmd,`${global.botname} hai`)},{quoted:m}); if(aA.length>250) return m.reply('Maksimal 250 karakter.'); await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}}); let Ab=applyWatermarkVars(setting.packname,m.pushName||'Sticker by erlic'); let bB=applyWatermarkVars(setting.author,m.pushName||''); let Aa=await axios.get('https://aqul-brat.hf.space/?text='+encodeURIComponent(aA),{responseType:'arraybuffer'}); let aB=new Sticker(Aa.data,{pack:Ab,author:bB,type:StickerTypes.FULL,id:'https://instagram.com/brzee_.sky'}); let Ba=await aB.toBuffer(); await erlic.sendMessage(m.chat,{sticker:Ba},{quoted:m}); } break;
         
-case 'bratgif': case 'bratvid': { const path = require('path'); let inputText = text || (m.quoted && m.quoted.text) || ''; if (!inputText) return erlic.sendMessage(m.chat, { text: func.example(cmd, `${global.botname} md`)}, { quoted: m }); if (inputText.trim().split(/\s+/).length < 2) return m.reply('Minimal 2 kata.'); if (inputText.length > 250) return m.reply('Maksimal 250 karakter.'); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const tmpDir = path.resolve("./tmp"); if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir); const videoFilePath = path.join(tmpDir, "bratgif.mp4"); const webpFilePath = path.join(tmpDir, "bratgif.webp"); let stickerPackName = applyWatermarkVars(global.packname, m.pushName || 'Sticker by erlic'); let stickerAuthor = applyWatermarkVars(global.author, m.pushName || ''); try { const apiUrl = `https://api.nekorinn.my.id/maker/bratvid?text=${encodeURIComponent(inputText)}`; const { data: videoBuffer } = await axios.get(apiUrl, { responseType: "arraybuffer" }); fs.writeFileSync(videoFilePath, videoBuffer); execSync(`ffmpeg -y -i "${videoFilePath}" -vcodec libwebp -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15" -loop 0 -ss 0 -t 5 -preset default -an -vsync 0 "${webpFilePath}"`); if (!fs.existsSync(webpFilePath)) return m.reply(mess.errorstc); const webpBuffer = fs.readFileSync(webpFilePath); const sticker = new Sticker(webpBuffer, { pack: stickerPackName, author: stickerAuthor, type: StickerTypes.FULL, id: 'https://instagram.com/arxhillie', quality: 100 }); const stickerBuffer = await sticker.toBuffer(); await erlic.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m }); fs.unlinkSync(videoFilePath); fs.unlinkSync(webpFilePath); } catch (error) { console.error(error); await handleError(error, m, erlic, 'stc'); } } break;
+case 'bratgif': case 'bratvid': { const path = require('path'); let inputText = text || (m.quoted && m.quoted.text) || ''; if (!inputText) return erlic.sendMessage(m.chat, { text: func.example(cmd, `${global.botname} md`)}, { quoted: m }); if (inputText.trim().split(/\s+/).length < 2) return m.reply('Minimal 2 kata.'); if (inputText.length > 250) return m.reply('Maksimal 250 karakter.'); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const tmpDir = path.resolve("./tmp"); if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir); const videoFilePath = path.join(tmpDir, "bratgif.mp4"); const webpFilePath = path.join(tmpDir, "bratgif.webp"); let stickerPackName = applyWatermarkVars(setting.packname, m.pushName || 'Sticker by erlic'); let stickerAuthor = applyWatermarkVars(setting.author, m.pushName || ''); try { const apiUrl = `https://api.nekorinn.my.id/maker/bratvid?text=${encodeURIComponent(inputText)}`; const { data: videoBuffer } = await axios.get(apiUrl, { responseType: "arraybuffer" }); fs.writeFileSync(videoFilePath, videoBuffer); execSync(`ffmpeg -y -i "${videoFilePath}" -vcodec libwebp -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15" -loop 0 -ss 0 -t 5 -preset default -an -vsync 0 "${webpFilePath}"`); if (!fs.existsSync(webpFilePath)) return m.reply(mess.errorstc); const webpBuffer = fs.readFileSync(webpFilePath); const sticker = new Sticker(webpBuffer, { pack: stickerPackName, author: stickerAuthor, type: StickerTypes.FULL, id: 'https://instagram.com/brzee_.sky', quality: 100 }); const stickerBuffer = await sticker.toBuffer(); await erlic.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m }); fs.unlinkSync(videoFilePath); fs.unlinkSync(webpFilePath); } catch (error) { console.error(error); await handleError(error, m, erlic, 'stc'); } } break;
         
 case 'stag': {
 let raw = (args[0] || '').replace(/[^0-9]/g, '')
@@ -6092,13 +6785,13 @@ if (!isCreator && isTargetOwner) return m.reply('Tidak bisa mengambil stiker dar
 await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
 let pporang = await erlic.profilePictureUrl(targetJid, 'image').catch(_ => '')
 if (!pporang) return m.reply('Gagal mengambil foto profil.')
-const packname = applyWatermarkVars(global.packname, m.pushName || 'Sticker by erlic')
-const author = applyWatermarkVars(global.author, m.pushName || '')
+const packname = applyWatermarkVars(setting.packname, m.pushName || 'Sticker by erlic')
+const author = applyWatermarkVars(setting.author, m.pushName || '')
 const { Sticker, StickerTypes } = require('wa-sticker-formatter')
 const stiker = new Sticker(pporang, {
 pack: packname,
 author: author,
-id: 'https://instagram.com/arxhillie',
+id: 'https://instagram.com/brzee_.sky',
 type: StickerTypes.FULL,
 quality: 100
 })
@@ -6110,17 +6803,17 @@ case 'stiker': case 'sticker': case 's': {
  const quoted = m.quoted ? m.quoted : m;
  const mime = (quoted.msg || quoted).mimetype || '';
  if (!quoted || !mime || !/webp|image|video/.test(mime)) {
- return m.reply(`Balas gambar, video <10 detik, atau stiker webp dengan perintah *${prefix + command}*`);
+ return m.reply(`Balas gambar, video <10 detik, atau stiker webp dengan perintah *${pripek + command}*`);
  }
  const dimas = await quoted.download();
  if (!dimas) return m.reply(mess.error);
  try {
- const packname = applyWatermarkVars(global.packname, m.pushName || 'Sticker by erlic');
-const author = applyWatermarkVars(global.author, m.pushName || '');
+ const packname = applyWatermarkVars(setting.packname, m.pushName || 'Sticker by erlic');
+const author = applyWatermarkVars(setting.author, m.pushName || '');
  const nathan = new Sticker(dimas, {
  pack: packname,
  author: author,
- id: 'https://instagram.com/arxhillie',
+ id: 'https://instagram.com/brzee_.sky',
  type: StickerTypes.FULL,
  quality: 100,
  });
@@ -6137,20 +6830,20 @@ case 's2': case 'stiker2': case 'sticker2': {
 const quoted = m.quoted ? m.quoted : m
 const mime = (quoted.msg || quoted).mimetype || ''
 if (!quoted || !mime || !/webp|image|video/.test(mime)) {
-return m.reply(`Balas gambar, video <10 detik, atau stiker webp dengan perintah *${prefix + command}*`)
+return m.reply(`Balas gambar, video <10 detik, atau stiker webp dengan perintah *${pripek + command}*`)
 }
 const dimas = await quoted.download()
 if (!dimas) return m.reply(mess.error)
 try {
 const sharp = require('sharp')
-const packname = applyWatermarkVars(global.packname, m.pushName || 'Sticker by erlic')
-const author = applyWatermarkVars(global.author, m.pushName || '')
+const packname = applyWatermarkVars(setting.packname, m.pushName || 'Sticker by erlic')
+const author = applyWatermarkVars(setting.author, m.pushName || '')
 let squareBuffer = await sharp(dimas).resize(512, 512, { fit: 'cover' }).toBuffer()
 const { Sticker, StickerTypes } = require('wa-sticker-formatter')
 const nathan = new Sticker(squareBuffer, {
 pack: packname,
 author: author,
-id: 'https://instagram.com/arxhillie',
+id: 'https://instagram.com/brzee_.sky',
 type: StickerTypes.FULL,
 quality: 100
 })
@@ -6162,6 +6855,62 @@ m.reply(mess.errorstc)
 }
 }
 break
+        
+case 'stickerwatermark':
+case 'swm': {
+const quoted = m.quoted ? m.quoted : m;
+const mime = (quoted.msg || quoted).mimetype || '';
+if (!quoted || !mime || !/webp|image|video/.test(mime)) return m.reply(`Balas gambar, video <10 detik, atau stiker dengan perintah *${pripek + command} [packname|author]*`);
+await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+const dimas = await quoted.download();
+if (!dimas) return m.reply(mess.error);
+try {
+let packname = '';
+let author = '';
+if (text?.includes('|')) {
+ [packname, author] = text.split('|').map(s => s.trim());
+} else if (text?.trim()) {
+ packname = text.trim();
+} else {
+ author = m.pushName || '';
+}
+const sticker = new Sticker(dimas, {
+ pack: packname,
+ author: author,
+ id: 'https://instagram.com/brzee_.sky',
+ type: StickerTypes.FULL,
+ quality: 100
+});
+const buffer = await sticker.toBuffer();
+await erlic.sendMessage(m.chat, { sticker: buffer }, { quoted: m });
+} catch (err) {
+console.error(err);
+m.reply(mess.errorstc);
+}
+}
+break;
+        
+case 'getexif': {
+const webpmux = require('node-webpmux')
+const quoted = m.quoted ? m.quoted : m;
+const mime = (quoted.msg || quoted).mimetype || '';
+if (!quoted || mime !== 'image/webp') return m.reply(`Balas stiker dengan perintah *${pripek + command}*`);
+await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+try {
+let img = new webpmux.Image();
+await img.load(await quoted.download());
+let data = JSON.parse(img.exif.slice(22));
+let txt = `◦  Sticker-pack-id : ${data['sticker-pack-id'] ?? '-'}`;
+txt += `\n◦  Sticker-pack-name : ${data['sticker-pack-name'] ?? '-'}`;
+txt += `\n◦  Sticker-pack-publisher : ${data['sticker-pack-publisher'] ?? '-'}`;
+txt += `\n◦  Is-avatar-sticker : ${data['is-avatar-sticker'] != 0 ? 'Yes' : 'No'}`;
+m.reply(txt);
+} catch (err) {
+console.error(err);
+m.reply('Gagal membaca metadata stiker.');
+}
+}
+break;
         
 case 'owner':case 'creator':{try{const masthan=global.owner.map((n,i)=>({displayName:global.ownername[i]||`Owner ${i+1}`,vcard:`BEGIN:VCARD\nVERSION:3.0\nN:${global.ownername[i]||`Owner ${i+1}`}\nFN:${global.ownername[i]||`Owner ${i+1}`}\nTEL;type=CELL;type=VOICE;waid=${n}:${n}\nADR;type=WORK:;;${(global.lokasi&&global.lokasi[i])||'-'};;;;\nEMAIL;type=Email:${(global.email&&global.email[i])||'-'}\nURL:${(global.website&&global.website[i])||'-'}\nEND:VCARD`}));const hidetag=global.owner.map(n=>n+'@s.whatsapp.net');await erlic.sendMessage(m.chat,{contacts:{displayName:'Owner Bot',contacts:masthan},mentions:hidetag},{quoted:qkontak})}catch(e){console.error(e);m.reply(mess.error)}}break;
         
@@ -6209,7 +6958,7 @@ case 'gpt3': {
   break;
 }
         
-case 'backup': { if (!isCreator) return m.reply(mess.owner); await erlic.sendMessage(m.chat, { react: { text: "🕒", key: m.key } }); const { execSync } = require("child_process"); const fs = require("fs"); const ls = (await execSync("ls")).toString().split("\n").filter(pe => pe !== "node_modules" && pe !== "session" && pe !== "tmp" && pe !== "package-lock.json" && pe !== ""); const now = new Date().toISOString().replace(/:/g, "-"), zipName = `backup_${now}.zip`; await execSync(`zip -r ${zipName} ${ls.join(" ")}`); const fileSize = fs.statSync(`./${zipName}`).size, sizeFormatted = fileSize < 1024 * 1024 ? `${(fileSize / 1024).toFixed(2)} KB` : `${(fileSize / (1024 * 1024)).toFixed(2)} MB`; const combined = [...(global.owner || [])], uniqueJids = [...new Set(combined.map(num => num.replace(/[^0-9]/g, '') + "@s.whatsapp.net"))]; for (let jid of uniqueJids) await erlic.sendMessage(jid, { document: fs.readFileSync(`./${zipName}`), caption: `Berikut adalah file backup kode bot ${global.botname}.\nSize: ${sizeFormatted}`, mimetype: "application/zip", fileName: zipName }, { quoted: m }); await execSync(`rm -rf ${zipName}`); if (m.isGroup) await erlic.sendMessage(m.chat, { text: "File backup berhasil dikirim ke owner." }, { quoted: m }); } break;
+case 'backupsc': { if (!isCreator) return m.reply(mess.owner); await erlic.sendMessage(m.chat, { react: { text: "🕒", key: m.key } }); const { execSync } = require("child_process"); const fs = require("fs"); const ls = (await execSync("ls")).toString().split("\n").filter(pe => pe !== "node_modules" && pe !== "session" && pe !== "tmp" && pe !== "package-lock.json" && pe !== ""); const now = new Date().toISOString().replace(/:/g, "-"), zipName = `backup_${now}.zip`; await execSync(`zip -r ${zipName} ${ls.join(" ")}`); const fileSize = fs.statSync(`./${zipName}`).size, sizeFormatted = fileSize < 1024 * 1024 ? `${(fileSize / 1024).toFixed(2)} KB` : `${(fileSize / (1024 * 1024)).toFixed(2)} MB`; const combined = [...(global.owner || [])], uniqueJids = [...new Set(combined.map(num => num.replace(/[^0-9]/g, '') + "@s.whatsapp.net"))]; for (let jid of uniqueJids) await erlic.sendMessage(m.sender, { document: fs.readFileSync(`./${zipName}`), caption: `Berikut adalah file backup kode bot ${global.botname}.\nSize: ${sizeFormatted}`, mimetype: "application/zip", fileName: zipName }, { quoted: m }); await execSync(`rm -rf ${zipName}`); if (m.isGroup) await erlic.sendMessage(m.chat, { text: "File backup berhasil dikirim ke owner." }, { quoted: m }); } break;
         
 case 'systeminfo': case 'infosistem': { const osu = require('node-os-utils'); const { performance } = require('perf_hooks'); const { totalmem, freemem } = require('os'); const createBar = (percentage, length = 10) => { const filled = Math.round((percentage / 100) * length); return `[${'■'.repeat(filled)}${'□'.repeat(length - filled)}] ${percentage}%`; }; const getStorageInfo = async () => { const drive = osu.drive; const { totalGb, usedGb } = await drive.info(); return { total: totalGb, used: usedGb }; }; let start = performance.now(); let { key } = await erlic.sendMessage(m.chat, { text: 'TESTING' }, { quoted: m, ephemeralExpiration: m.expiration }); let end = performance.now(); let ping = Math.round(end - start); const totalMemory = totalmem(); const freeMemory = freemem(); const usedMemory = totalMemory - freeMemory; const memoryUsage = Math.round((usedMemory / totalMemory) * 100); const storage = await getStorageInfo(); const storageUsage = Math.round((storage.used / storage.total) * 100); const caption = `PING: ${ping} ms\n\nRAM:\n${createBar(memoryUsage)}\n\nSTORAGE:\n${createBar(storageUsage)}\n\nTotal Storage: ${storage.total} GB\nUsed Storage: ${storage.used} GB`.trim(); await erlic.sendMessage(m.chat, { text: caption, edit: key }, { quoted: m, ephemeralExpiration: m.expiration }); } break;
         
@@ -6365,23 +7114,37 @@ break
   break;
 }
         
-case 'fb': case 'facebook': {
-  if (!text) return erlic.sendMessage(m.chat, { text: func.example(cmd, 'https://www.facebook.com/share/r/12BFZAtjpS8/?mibextid=qDwCgo') }, { quoted: m });
+case 'fb':
+case 'facebook': {
+  if (!text) return erlic.sendMessage(m.chat, {
+    text: func.example(cmd, 'https://www.facebook.com/vidiotsvideo/videos/23870922699259186/')
+  }, { quoted: m });
 
-  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
+  await erlic.sendMessage(m.chat, {
+    react: { text: '🕒', key: m.key }
+  });
 
   try {
-    const res = await fetch(`https://api.siputzx.my.id/api/d/facebook?url=${encodeURIComponent(text)}`);
+    const res = await fetch(`https://www.apis-anomaki.zone.id/downloader/aio2?url=${encodeURIComponent(text)}`);
     const json = await res.json();
+    if (!json.status || !json.result) return m.reply(mess.error);
 
-    if (!json.status || !json.data || json.data.length === 0) return m.reply(mess.error);
+    const result = json.result;
+    const { title, medias } = result;
 
-    const videoData = json.data[0];
+    const video = medias.find(m => m.type === 'video');
+
+    if (!video?.url) return m.reply('Video tidak tersedia.');
+
     const caption = `乂 *FACEBOOK DOWNLOADER*\n\n` +
-      `- *Resolution:* ${videoData.resolution || '-'}\n` +
-      `- *Format:* ${videoData.format || '-'}`;
+                    `- *Title:* ${title || '-'}\n` +
+                    `- *Quality:* HD`;
 
-    await erlic.sendMessage(m.chat, { video: { url: videoData.url }, caption: caption }, { quoted: m });
+    const msg = await erlic.sendMessage(m.chat, {
+      video: { url: video.url },
+      caption
+    }, { quoted: m });
+
   } catch (e) {
     console.error(e);
     m.reply(mess.error);
@@ -6525,7 +7288,7 @@ case 'twitter': {
     const axios = require('axios')
     const cheerio = require('cheerio')
     const qs = require('qs');
-  if (!text) return erlic.sendMessage(m.chat, { text: func.example(cmd, 'https://twitter.com/username/status/1234567890') }, { quoted: m });
+  if (!text) return erlic.sendMessage(m.chat, { text: func.example(cmd, 'https://x.com/arsipmim/status/1947124665379618858?t=1eESYVqE7DUe5yU0bwIq7g&s=19') }, { quoted: m });
   await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
   async function twitter(link) {
     return new Promise((resolve, reject) => {
@@ -6715,7 +7478,73 @@ case 'spotify': {
 }
 break;
 
+case 'aio':
+case 'allindownloader': {
+  if (!text) return erlic.sendMessage(m.chat, {
+    text: func.example(cmd, 'https://vt.tiktok.com/ZS69hH7wc/')
+  }, { quoted: m });
 
+  await erlic.sendMessage(m.chat, {
+    react: { text: '🕒', key: m.key }
+  });
+
+  try {
+    const res = await fetch(`https://www.apis-anomaki.zone.id/downloader/aio2?url=${encodeURIComponent(text)}`);
+    const json = await res.json();
+    if (!json.status || !json.result) return m.reply(mess.error);
+
+    const result = json.result;
+    const {
+      title,
+      author,
+      unique_id,
+      thumbnail,
+      source,
+      medias
+    } = result;
+
+    const video = medias.find(m => m.type === 'video' && m.quality.includes('no_watermark')) || medias.find(m => m.type === 'video');
+    const audio = medias.find(m => m.type === 'audio');
+
+    const caption = `乂 *ALL-IN-ONE DOWNLOADER*\n\n` +
+                    `- *Source:* ${source || '-'}\n` +
+                    `- *Title:* ${title || '-'}\n` +
+                    `- *Username:* ${unique_id || '-'}\n` +
+                    `- *Nickname:* ${author || '-'}\n` +
+                    `- *Quality:* ${isPrem? "HD" : "MEDIUM"}`;
+
+    let msg;
+
+    if (video?.url) {
+      msg = await erlic.sendMessage(m.chat, {
+        video: { url: video.url },
+        caption
+      }, { quoted: m });
+    } else if (thumbnail) {
+      msg = await erlic.sendMessage(m.chat, {
+        image: { url: thumbnail },
+        caption
+      }, { quoted: m });
+    } else {
+      await erlic.sendMessage(m.chat, {
+        text: caption
+      }, { quoted: m });
+    }
+
+    if (audio?.url) {
+      await delay(500); // beri jeda agar tidak nabrak pengiriman
+      await erlic.sendMessage(m.chat, {
+        audio: { url: audio.url },
+        mimetype: 'audio/mpeg'
+      }, { quoted: msg?.key ? msg : m });
+    }
+
+  } catch (e) {
+    console.error(e);
+    m.reply(mess.error);
+  }
+}
+break;
         
 case 'soundcloud': {
   if (!text) return erlic.sendMessage(m.chat, { text: func.example(cmd, 'https://m.soundcloud.com/teguh-hariyadi-652597010/anji-dia') }, { quoted: m });
@@ -6794,77 +7623,144 @@ case 'snackvideo': {
 }
 break;
         
-case 'ytmp3': case 'ytmp4': {
-    const axios = require('axios')
-  if (!text) return m.reply(func.example(cmd, 'https://youtu.be/xxxxxxx'));
-  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
+case 'ytmp3':
+case 'ytmp4': {
+  const axios = require('axios')
+  if (!text) return m.reply(func.example(cmd, 'https://youtu.be/xxxxxxx'))
+  if (!/youtu\.?be/i.test(text)) return m.reply(mess.errorUrl)
 
-  try {
-    const isAudio = command === 'ytmp3';
-    const apiUrl = `https://api.siputzx.my.id/api/d/${isAudio ? 'ytmp3' : 'ytmp4'}?url=${encodeURIComponent(text)}`;
-    const { data } = await axios.get(apiUrl);
-    if (!data?.status || !data?.data?.dl) {
-      return m.reply(`Gagal mengunduh.\nAlasan: ${data?.message || 'Link tidak tersedia'}`);
-    }
-    const caption = `乂 *YOUTUBE DOWNLOADER ${isAudio ? 'MP3' : 'MP4'}*\n\n`
-  + `◦ *Title* : ${data.data.title || '-'}\n`
-  + `◦ *Format* : ${isAudio ? 'Audio (MP3)' : 'Video'}\n`;
-if (isAudio) {
-  let tadi = await m.reply(caption);
-  await erlic.sendMessage(m.chat, {
-    audio: { url: data.data.dl },
-    mimetype: 'audio/mp4'
-  }, { quoted: tadi });
-} else {
-  await erlic.sendMessage(m.chat, {
-    video: { url: data.data.dl },
-    caption,
-    mimetype: 'video/mp4'
-  }, { quoted: m });
-}
- await erlic.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
-  } catch (e) {
-    console.error(e);
-    m.reply(mess.error);
+  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+
+  const isAudio = command === 'ytmp3'
+  const cleanUrl = text.split('&')[0] // Hapus parameter tambahan
+  const encodedUrl = encodeURIComponent(cleanUrl)
+
+  let apiUrl = isAudio
+    ? `https://api.fasturl.link/youtube/audio?query=${encodedUrl}&mode=url`
+    : `https://api.fasturl.link/youtube/video?query=${encodedUrl}&resolution=720&mode=url`
+
+  // Ambil data dari API
+  const response = await axios.get(apiUrl).catch(() => null)
+  const data = response?.data
+
+  // Cek apakah respons valid
+  if (!data || data.status !== 200 || !data.result) {
+    await m.reply('❌ Gagal mendapatkan data dari server.')
+    break
   }
-  break;
+
+  const r = data.result
+  const title = r.title || 'Unknown Title'
+  const duration = r.metadata?.duration || '00:00:00'
+  const size = r.sizeMb ? `${r.sizeMb} MB` : '-'
+  const quality = r.quality || 'Unknown'
+  const downloadUrl = r.downloadUrl?.trim()
+
+  if (!downloadUrl) {
+    await m.reply('❌ Tautan unduhan tidak tersedia.')
+    break
+  }
+
+  if (isAudio) {
+    const caption = `乂 *YOUTUBE DOWNLOADER MP3*\n\n` +
+      `◦ *Title* : ${title}\n` +
+      `◦ *Durasi* : ${duration}\n` +
+      `◦ *Kualitas* : ${quality}\n` +
+      `◦ *Format* : MP3\n` +
+      `◦ *Ukuran* : ${size}\n\n_Sedang mengirim..._`
+
+    const loading = await m.reply(caption)
+    await erlic.sendMessage(m.chat, {
+      audio: { url: downloadUrl },
+      mimetype: 'audio/mpeg'
+    }, { quoted: loading })
+
+  } else {
+    const caption = `乂 *YOUTUBE DOWNLOADER MP4*\n\n` +
+      `◦ *Title* : ${title}\n` +
+      `◦ *Durasi* : ${duration}\n` +
+      `◦ *Resolusi* : ${quality}\n` +
+      `◦ *Format* : MP4\n` +
+      `◦ *Ukuran* : ${size}`
+
+    await erlic.sendMessage(m.chat, {
+      video: { url: downloadUrl },
+      caption: caption,
+      mimetype: 'video/mp4'
+    }, { quoted: m })
+  }
+
+  await erlic.sendMessage(m.chat, { react: { text: '✅', key: m.key } })
+  break
 }
         
 case 'instagram':
 case 'ig': {
   if (!text) return m.reply(func.example(cmd, 'https://www.instagram.com/reel/C_Phn6NSIfQ/'))
   if (!/instagram\.com/i.test(text)) return m.reply(mess.errorUrl)
+
   await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
+
   const axios = require('axios')
-  const apiUrl = `https://zenzxz.dpdns.org/downloader/instagram?url=${encodeURIComponent(text)}`
-  const { data } = await axios.get(apiUrl)
-  if (!data || !data.status || !data.result) return m.reply(mess.error)
-  const r = data.result
-  if (Array.isArray(r.videos) && r.videos.length > 0) {
-    const caption = `乂 *INSTAGRAM DOWNLOADER*\n\n` +
-      `- *Username:* ${r.username || '-'}\n` +
-      `- *Author:* ${r.name || '-'}\n` +
-      `- *Quality:* MEDIUM`
-    await erlic.sendMessage(m.chat, {
-      video: { url: r.videos[0] },
-      caption
-    }, { quoted: m })
-  } else if (Array.isArray(r.images) && r.images.length > 0) {
-    const totalImages = r.images.length
-    const caption = `乂 *INSTAGRAM DOWNLOADER*\n\n` +
-      `- *Username:* ${r.username || '-'}\n` +
-      `- *Author:* ${r.name || '-'}\n` +
-      `- *Quality:* MEDIUM\n` +
-      `- *Total images:* ${totalImages}`
-    for (let i = 0; i < totalImages; i++) {
+  const url = encodeURIComponent(text)
+  const aioRes = await axios.get(`https://www.apis-anomaki.zone.id/downloader/aio3?url=${url}`)
+  const aioData = aioRes.data
+
+  if (aioData?.status && 
+      aioData.result?.status === 'ok' && 
+      aioData.result.data?.links?.video) {
+
+    const r = aioData.result.data
+    const author = r.author || {}
+    const videoLink = r.links.video["HD video"]?.url || Object.values(r.links.video)[0]?.url
+
+    if (videoLink) {
+      const caption = `乂 *INSTAGRAM DOWNLOADER*\n\n` +
+        `- *Caption:* ${r.title || '-'}\n` +
+        `- *Quality:* HD`
+
       await erlic.sendMessage(m.chat, {
-        image: { url: r.images[i] },
-        ...(i === 0 ? { caption } : {})
+        video: { url: videoLink },
+        caption: caption,
+        contextInfo: {
+          externalAdReply: {
+            title: author.username || 'Instagram User',
+            body: author.full_name || '',
+            thumbnailUrl: author.avatar || setting.cover,
+            sourceUrl: text,
+            mediaType: 1,
+            renderLargerThumbnail: false,
+            showAdAttribution: false
+          }
+        }
       }, { quoted: m })
+
+      await erlic.sendMessage(m.chat, { react: { text: '✅', key: m.key } })
+      break
     }
-  } else {
-    m.reply('Tidak ada media yang dapat diunduh dari link tersebut.')
   }
+  const dligRes = await axios.get(`https://www.apis-anomaki.zone.id/downloader/dlig?url=${url}`)
+  const dligData = dligRes.data
+
+  if (dligData?.status && dligData.result?.result?.length > 0) {
+    const r = dligData.result.result[0]
+    const caption = `乂 *INSTAGRAM DOWNLOADER*\n\n` +
+      `- *Type:* ${r.type || '-'}\n` +
+      `- *Quality:* MEDIUM`
+
+    if (r.type === 'video') {
+      await erlic.sendMessage(m.chat, { video: { url: r.downloadLink }, caption }, { quoted: m })
+    } else if (r.type === 'image') {
+      await erlic.sendMessage(m.chat, { image: { url: r.downloadLink }, caption }, { quoted: m })
+    } else {
+      await m.reply('Tidak ada media yang dapat diunduh dari link tersebut.')
+    }
+
+    await erlic.sendMessage(m.chat, { react: { text: '✅', key: m.key } })
+  } else {
+    await m.reply(mess.error)
+  }
+
   break
 }
         
@@ -7056,6 +7952,1223 @@ case 'readmore': case 'rm': {
   m.reply(teks)
 }
   break
+    
+case 'buybibit': {
+    if (!global.db.users) global.db.users = {};
+    if (!global.db.users[m.sender]) {
+        global.db.users[m.sender] = new Proxy({}, {
+            get(target, prop) {
+                if (!(prop in target)) {
+                    if (['money'].includes(prop)) target[prop] = 0;
+                    else target[prop] = 0;
+                }
+                return target[prop];
+            },
+            set(target, prop, value) {
+                target[prop] = value;
+                return true;
+            }
+        });
+    }
+
+    let sender = global.db.users[m.sender];
+
+    const bibitNames = ['apel','anggur','mangga','jeruk','pisang','wortel','kentang','tomat','kubis','terong','labu'];
+    for (let bibit of bibitNames) sender['bibit'+bibit] = sender['bibit'+bibit] || 0;
+    sender.money = sender.money || 0;
+
+    const bibitList = bibitNames.map(name => ({ 
+        name, 
+        count: sender['bibit'+name], 
+        pricePerBibit: ['apel','anggur','mangga','jeruk','pisang'].includes(name) ? 1250 : 1000 
+    }));
+
+    let args = m.args && m.args.length ? m.args : m.text.trim().split(/\s+/).slice(1);
+let selectedNumber = (args[0] || '').replace(/[^0-9]/g, '');
+let optionIndex = Number(selectedNumber) - 1;
+
+    if (!selectedNumber) {
+        let menuMessage = `乂 *BUY BIBIT*\n\n` +
+            `1. Beli semua bibit\n` +
+            `2. Beli bibit yang kurang\n\n` +
+            `Ketik *${setting.prefix}buybibit <nomor>* untuk membeli.`;
+        return erlic.sendMessage(m.chat, { text: menuMessage }, { quoted: m });
+    }
+
+    if (isNaN(optionIndex) || optionIndex < 0 || optionIndex >= 2) {
+        return erlic.sendMessage(m.chat, { text: "Nomor opsi tidak valid. Silakan pilih nomor yang tersedia." }, { quoted: m });
+    }
+
+    let totalPrice = 0;
+    let purchaseMessage = `Pembelian Berhasil!\n\n`;
+
+    if (optionIndex === 1) { 
+        for (let bibit of bibitList) {
+            if (bibit.count < 100) {
+                let needed = 100 - bibit.count;
+                let price = needed * bibit.pricePerBibit;
+                purchaseMessage += `- Bibit ${bibit.name}: +${needed}\n`;
+                totalPrice += price;
+                sender['bibit'+bibit.name] += needed;
+            }
+        }
+    } else { 
+        for (let bibit of bibitList) {
+            let needed = 100;
+            let price = needed * bibit.pricePerBibit;
+            purchaseMessage += `- Bibit ${bibit.name}: +${needed}\n`;
+            totalPrice += price;
+            sender['bibit'+bibit.name] += needed;
+        }
+    }
+
+    if (totalPrice > 0) {
+        if (sender.money >= totalPrice) {
+            sender.money -= totalPrice;
+            purchaseMessage += `\n*Total Harga:* $${totalPrice.toLocaleString('en-US')}`;
+            return erlic.sendMessage(m.chat, { text: purchaseMessage }, { quoted: m });
+        } else {
+            return erlic.sendMessage(m.chat, {
+                text: `Uang kamu tidak cukup!\n\n` +
+                    `> Dibutuhkan: $${totalPrice.toLocaleString('en-US')}\n` +
+                    `> Uang kamu: $${sender.money.toLocaleString('en-US')}`
+            }, { quoted: m });
+        }
+    } else {
+        return erlic.sendMessage(m.chat, { text: 'Semua bibit sudah cukup, tidak ada yang perlu dibeli.' }, { quoted: m });
+    }
+}
+break;
+    
+case 'sell': {
+    const { createCanvas } = require('canvas');
+    const fs = require('fs');
+    const FormData = require('form-data');
+    const axios = require('axios');
+
+    function formatMoney(amount) {
+        return '$' + amount.toLocaleString('id-ID');
+    }
+
+    async function createTransactionImage(username, text) {
+        const canvas = createCanvas(800, 600);
+        const ctx = canvas.getContext('2d');
+
+        
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 30px Arial';
+        ctx.fillText(`Username: ${username}`, 50, 50);
+        ctx.font = '24px Arial';
+        const lines = text.split('\n');
+        let y = 100;
+        lines.forEach(line => {
+            ctx.fillText(line, 50, y);
+            y += 40;
+        });
+
+        if (!fs.existsSync('./sampah')) fs.mkdirSync('./sampah', { recursive: true });
+
+        const imagePath = `./sampah/transaction_${Date.now()}.png`;
+        const buffer = canvas.toBuffer('image/png');
+        fs.writeFileSync(imagePath, buffer);
+
+        return imagePath;
+    }
+
+    let sender = new Proxy(global.db.users[m.sender] || {}, {
+        get(target, prop) { return prop in target ? target[prop] : 0 },
+        set(target, prop, value) { target[prop] = value; return true }
+    });
+
+    const items = {
+        bibit: {
+            bibitanggur: { price: 1000, icon: '🍇' },
+            bibitapel: { price: 1000, icon: '🍎' },
+            bibitjeruk: { price: 1000, icon: '🍊' },
+            bibitmangga: { price: 1000, icon: '🥭' },
+            bibitpisang: { price: 1000, icon: '🍌' },
+            bibitwortel: { price: 500, icon: '🥕' },
+            bibitlabu: { price: 500, icon: '🎃' },
+            bibitkubis: { price: 500, icon: '🥬' },
+            bibitterong: { price: 500, icon: '🍆' },
+            bibitkentang: { price: 500, icon: '🥔' },
+            bibittomat: { price: 500, icon: '🍅' },
+        },
+        buah: {
+            anggur: { price: 1000, icon: '🍇' },
+            apel: { price: 1000, icon: '🍎' },
+            jeruk: { price: 1000, icon: '🍊' },
+            mangga: { price: 1000, icon: '🥭' },
+            pisang: { price: 1000, icon: '🍌' },
+        },
+        sayur: {
+            wortel: { price: 750, icon: '🥕' },
+            labu: { price: 750, icon: '🎃' },
+            kubis: { price: 750, icon: '🥬' },
+            terong: { price: 750, icon: '🍆' },
+            kentang: { price: 1000, icon: '🥔' },
+            tomat: { price: 1000, icon: '🍅' },
+        },
+        hewan: {
+            banteng: { price: 1000, icon: '🐂' },
+            harimau: { price: 1000, icon: '🐅' },
+            gajah: { price: 1000, icon: '🐘' },
+            kambing: { price: 1000, icon: '🐐' },
+            panda: { price: 1000, icon: '🐼' },
+            buaya: { price: 1000, icon: '🐊' },
+            kerbau: { price: 1000, icon: '🐃' },
+            sapi: { price: 1000, icon: '🐄' },
+            monyet: { price: 1000, icon: '🐒' },
+            babi: { price: 1000, icon: '🐖' },
+            babihutan: { price: 1000, icon: '🐗' },
+            ayam: { price: 1000, icon: '🐓' },
+        },
+        seafood: {
+            tongkol: { price: 1000, icon: '🐟' },
+            buntal: { price: 1000, icon: '🐡' },
+            kepiting: { price: 1000, icon: '🦀' },
+            udang: { price: 1000, icon: '🦐' },
+            kerang: { price: 1000, icon: '🐚' },
+            pausmini: { price: 1000, icon: '🐋' },
+            gurita: { price: 1000, icon: '🐙' },
+            nila: { price: 1000, icon: '🐠' },
+            cumi: { price: 1000, icon: '🦑' },
+            langka: { price: 1000, icon: '🐳' },
+        },
+        sampah: {
+            plastik: { price: 100, icon: '🍶' },
+            batu: { price: 100, icon: '🪨' },
+            kardus: { price: 100, icon: '📦' },
+            kaleng: { price: 100, icon: '🥫' },
+            daun: { price: 100, icon: '🍂' },
+            trash: { price: 100, icon: '🗑️' },
+        },
+        spaces: {
+            meteorit: { price: 100, icon: '☄️' },
+            crystal: { price: 100, icon: '💎' },
+            metal: { price: 100, icon: '🔩' },
+            stardust: { price: 100, icon: '✨' },
+            alien_artifact: { price: 100, icon: '🛸' },
+            moon_rock: { price: 100, icon: '🌑' },
+            unknown_substance: { price: 100, icon: '🧪' },
+        }
+    };
+
+    const categories = Object.keys(items);
+
+    if (!text) {
+        let teks = '';
+        for (const category of categories) {
+            let totalCategoryItems = Object.keys(items[category]).reduce((sum, itemName) => sum + sender[itemName], 0);
+            teks += `*${category.toUpperCase()}*\n\`\`\`\n`;
+            teks += `No. | Item             | Harga\n`;
+            teks += `--------------------------------\n`;
+            let idx = 1;
+            Object.entries(items[category]).forEach(([name, item]) => {
+                teks += `${idx.toString().padEnd(3)} | ${item.icon} ${name.padEnd(15)} | ${formatMoney(item.price)}\n`;
+                idx++;
+            });
+            teks += `--------------------------------\n\`\`\`\n`;
+            teks += `Kamu memiliki ${totalCategoryItems} ${category}.\n`;
+            teks += `> ${setting.prefix + command} ${category} untuk menjual semua ${category}.\n\n`;
+        }
+        teks += `Contoh: ${setting.prefix + command} wortel 50`;
+        return erlic.sendMessage(m.chat, { text: teks }, { quoted: m });
+    }
+
+    const args = text.split(/\s+/);
+    const itemToSell = args[0].toLowerCase();
+    const sellAmount = parseInt(args[1], 10);
+
+    const sellAll = async (category) => {
+        let totalProfit = 0, totalItems = 0;
+        Object.entries(items[category]).forEach(([name, item]) => {
+            if (sender[name] > 0) {
+                totalProfit += sender[name] * item.price;
+                totalItems += sender[name];
+                sender.money += sender[name] * item.price;
+                sender[name] = 0;
+            }
+        });
+        if (totalProfit === 0) return erlic.sendMessage(m.chat, { text: `Kamu tidak memiliki ${category} untuk dijual!` }, { quoted: m });
+
+        const teks = `乂 *TRANSACTION - SELL*\nProduct: ALL ${category.toUpperCase()}\nCount: ${totalItems}\nTotal: ${formatMoney(totalProfit)}\nStatus: Success ✅`;
+
+        const imagePath = await createTransactionImage(sender.username || m.pushName, teks);
+        const media = fs.readFileSync(imagePath);
+
+        const form = new FormData();
+        form.append('reqtype', 'fileupload');
+        form.append('fileToUpload', media, 'transaction.png');
+
+        let url;
+        try {
+            const upload = await axios.post('https://catbox.moe/user/api.php', form, {
+                headers: form.getHeaders()
+            });
+            url = upload.data.trim();
+        } catch (err) {
+            console.error('Upload failed:', err.message);
+            // fs.unlinkSync(imagePath); 
+            return erlic.sendMessage(m.chat, { text: 'Gagal mengunggah gambar. Transaksi berhasil, tapi tanpa gambar.' }, { quoted: m });
+        }
+
+        //fs.unlinkSync(imagePath);
+
+        return erlic.sendMessage(m.chat, {
+            text: teks,
+            contextInfo: {
+                externalAdReply: {
+                    title: 'TRANSACTION - SELL',
+                    body: global.header || 'Farming Bot',
+                    thumbnailUrl: url,
+                    renderLargerThumbnail: true
+                }
+            }
+        }, { quoted: m });
+    };
+
+    if (categories.includes(itemToSell)) return sellAll(itemToSell);
+
+    let itemSell = null;
+    let foundCategory = '';
+    for (const category of categories) {
+        if (items[category][itemToSell]) {
+            itemSell = items[category][itemToSell];
+            foundCategory = category;
+            break;
+        }
+    }
+
+    if (!itemSell) return erlic.sendMessage(m.chat, { text: `Item "${itemToSell}" tidak ditemukan!` }, { quoted: m });
+    if (isNaN(sellAmount) || sellAmount <= 0) return erlic.sendMessage(m.chat, { text: 'Jumlah harus > 0!' }, { quoted: m });
+    if (sender[itemToSell] < sellAmount) return erlic.sendMessage(m.chat, { text: `Kamu tidak memiliki cukup ${itemToSell}!` }, { quoted: m });
+
+    const totalSellPrice = itemSell.price * sellAmount;
+    sender.money += totalSellPrice;
+    sender[itemToSell] -= sellAmount;
+
+    const teks = `乂 *TRANSACTION - SELL*\nProduct: ${itemSell.icon} ${itemToSell.toUpperCase()}\nCount: ${sellAmount}\nPrice: ${formatMoney(itemSell.price)}\nTotal: ${formatMoney(totalSellPrice)}\nStatus: Success ✅`;
+
+    const imagePath = await createTransactionImage(sender.username || m.pushName, teks);
+    const media = fs.readFileSync(imagePath);
+
+    const form = new FormData();
+    form.append('reqtype', 'fileupload');
+    form.append('fileToUpload', media, 'transaction.png');
+
+    let url;
+    try {
+        const upload = await axios.post('https://catbox.moe/user/api.php', form, {
+            headers: form.getHeaders()
+        });
+        url = upload.data.trim();
+    } catch (err) {
+        console.error('Upload failed:', err.message);
+      //  return erlic.sendMessage(m.chat, { text: 'Gagal mengunggah gambar. Transaksi berhasil, tapi tanpa gambar.' }, { quoted: m });
+    }
+
+    
+   fs.unlinkSync(imagePath);
+
+    return erlic.sendMessage(m.chat, {
+        text: teks,
+        contextInfo: {
+            externalAdReply: {
+                title: 'TRANSACTION - SELL',
+                body: global.header || 'Farming Bot',
+                thumbnailUrl: url,
+                renderLargerThumbnail: true
+            }
+        }
+    }, { quoted: m });
+
+} break;
+    
+case 'buy': {
+    const { createCanvas } = require('canvas');
+    const fs = require('fs');
+    const FormData = require('form-data');
+    const axios = require('axios');
+
+    if (!global.db.users) global.db.users = {};
+    if (!global.db.users[m.sender]) global.db.users[m.sender] = {};
+
+    let sender = new Proxy(global.db.users[m.sender], {
+        get(target, prop) {
+            if (!(prop in target)) target[prop] = 0;
+            return target[prop];
+        },
+        set(target, prop, value) {
+            target[prop] = value;
+            return true;
+        }
+    });
+
+    function formatMoney(amount) {
+        return '$' + amount.toLocaleString('id-ID');
+    }
+
+    async function createTransactionImage(username, text) {
+        const canvas = createCanvas(800, 600);
+        const ctx = canvas.getContext('2d');
+
+        ctx.fillStyle = '#f8f9fa';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 30px Arial';
+        ctx.fillText(`Pembeli: ${username}`, 50, 50);
+
+        ctx.font = '24px Arial';
+        const lines = text.split('\n');
+        let y = 100;
+        lines.forEach(line => {
+            if (line.trim()) {
+                ctx.fillText(line, 50, y);
+                y += 40;
+            }
+        });
+
+        if (!fs.existsSync('./sampah')) fs.mkdirSync('./sampah', { recursive: true });
+        const imagePath = `./sampah/buy_${Date.now()}.png`;
+        const buffer = canvas.toBuffer('image/png');
+        fs.writeFileSync(imagePath, buffer);
+
+        return imagePath;
+    }
+
+    const items = {
+        Bumbu: {
+            bawang: { price: 300, icon: '🧄' },
+            kemiri: { price: 500, icon: '🌰' },
+            jahe: { price: 800, icon: '🫚' },
+            asam: { price: 400, icon: '🍋' },
+            cabai: { price: 700, icon: '🌶️' },
+            saus: { price: 350, icon: '🍾' },
+        },
+        Ternak: {
+            ayam: { price: 2000, icon: '🐓' },
+            babi: { price: 5000, icon: '🐖' },
+            babihutan: { price: 10000, icon: '🐗' },
+            banteng: { price: 20000, icon: '🐂' },
+            kambing: { price: 15000, icon: '🐐' },
+            kerbau: { price: 30000, icon: '🐃' },
+            panda: { price: 50000, icon: '🐼' },
+            sapi: { price: 50000, icon: '🐄' },
+            monyet: { price: 25000, icon: '🐒' },
+        },
+        Buah: {
+            anggur: { price: 200, icon: '🍇' },
+            apel: { price: 500, icon: '🍎' },
+            jeruk: { price: 1000, icon: '🍊' },
+            mangga: { price: 1500, icon: '🥭' },
+            pisang: { price: 3000, icon: '🍌' },
+        },
+        Sayur: {
+            wortel: { price: 750, icon: '🥕' },
+            labu: { price: 750, icon: '🎃' },
+            kubis: { price: 750, icon: '🥬' },
+            terong: { price: 750, icon: '🍆' },
+            kentang: { price: 1000, icon: '🥔' },
+            tomat: { price: 1000, icon: '🍅' },
+        },
+        Tambang: {
+            rock: { price: 8000, icon: '🪨' },
+            diamond: { price: 100000, icon: '💎' },
+            emerald: { price: 90000, icon: '🟢' },
+            gold: { price: 70000, icon: '🥇' },
+            iron: { price: 60000, icon: '⛏️' },
+        },
+        Seafood: {
+            tongkol: { price: 3000, icon: '🐟' },
+            buntal: { price: 5000, icon: '🐡' },
+            pausmini: { price: 8000, icon: '🐋' },
+            udang: { price: 4000, icon: '🦐' },
+            gurita: { price: 7000, icon: '🐙' },
+            nila: { price: 3500, icon: '🐠' },
+            cumi: { price: 6000, icon: '🦑' },
+            langka: { price: 12000, icon: '🐳' },
+            kepiting: { price: 5000, icon: '🦀' },
+            kerang: { price: 3000, icon: '🐚' },
+        },
+    };
+
+    const args = text.trim().split(/\s+/);
+    const itemNameRaw = args[0];
+    const countRaw = args[1];
+
+    if (!text) {
+        let teks = '';
+        for (const [category, categoryItems] of Object.entries(items)) {
+            teks += `*${category.toUpperCase()}*\n\`\`\`\n`;
+            teks += `No. | Nama Item          | Harga    \n`;
+            teks += `--------------------------------\n`;
+
+            let index = 1;
+            for (const [itemName, item] of Object.entries(categoryItems)) {
+                const number = index.toString().padEnd(3);
+                const itemText = `${item.icon} ${itemName}`.padEnd(20);
+                const price = formatMoney(item.price).padStart(8);
+                teks += `${number} | ${itemText} | ${price}\n`;
+                index++;
+            }
+
+            teks += `--------------------------------\n\`\`\`\n`;
+        }
+
+        teks += `> Contoh: ${setting.prefix + command} apel 5\n> Uang kamu: *${formatMoney(sender.money)}*`;
+        return erlic.sendMessage(m.chat, { text: teks }, { quoted: func.fstatus("STORE - BUY") });
+    }
+
+    if (!itemNameRaw) {
+        return erlic.sendMessage(m.chat, { text: 'Silakan masukkan nama item yang ingin dibeli.' }, { quoted: m });
+    }
+
+    const itemName = itemNameRaw.toLowerCase();
+    const count = Math.max(1, parseInt(countRaw) || 1);
+
+    if (count <= 0) {
+        return erlic.sendMessage(m.chat, { text: 'Jumlah item harus lebih dari 0.' }, { quoted: m });
+    }
+
+    let foundItem = null;
+    for (const categoryItems of Object.values(items)) {
+        if (categoryItems[itemName]) {
+            foundItem = categoryItems[itemName];
+            break;
+        }
+    }
+
+    if (!foundItem) {
+        return erlic.sendMessage(m.chat, { text: `Item "${itemName}" tidak ditemukan!` }, { quoted: m });
+    }
+
+    const totalPrice = foundItem.price * count;
+
+    if (sender.money < totalPrice) {
+        return erlic.sendMessage(m.chat, {
+            text: `Uang kamu tidak cukup untuk membeli ${count} ${itemName}.\n` +
+                `> Uang kamu: *${formatMoney(sender.money)}*\n> Dibutuhkan: *${formatMoney(totalPrice)}*`
+        }, { quoted: m });
+    }
+
+    
+    sender.money -= totalPrice;
+    sender[itemName] = (sender[itemName] || 0) + count;
+
+    const teks = `乂 *TRANSACTION - BUY*\n\n` +
+        `- *Product* : ${foundItem.icon} ${itemName}\n` +
+        `- *Count*   : ${count}\n` +
+        `- *Price*   : ${formatMoney(foundItem.price)}\n` +
+        `- *Total*   : ${formatMoney(totalPrice)}\n` +
+        `- *Status*  : Success ✅`;
+
+    const imagePath = await createTransactionImage(sender.username, teks);
+    const media = fs.readFileSync(imagePath);
+
+    const form = new FormData();
+    form.append('reqtype', 'fileupload');
+    form.append('fileToUpload', media, 'buy_transaction.png');
+
+    let url;
+    try {
+        const upload = await axios.post('https://catbox.moe/user/api.php', form, {
+            headers: form.getHeaders()
+        });
+        url = upload.data.trim();
+    } catch (err) {
+        fs.unlinkSync(imagePath);
+        return erlic.sendMessage(m.chat, {
+            text: 'Gagal mengunggah gambar. Transaksi berhasil tanpa gambar.'
+        }, { quoted: m });
+    }
+
+    fs.unlinkSync(imagePath);
+
+    return erlic.sendMessage(m.chat, {
+        text: teks,
+        contextInfo: {
+            externalAdReply: {
+                title: 'TRANSACTION - BUY',
+                body: global.header || 'Farming Bot',
+                thumbnailUrl: url,
+                renderLargerThumbnail: true
+            }
+        }
+    }, { quoted: m });
+
+} break;
+    
+case 'inv':
+case 'inventory': {
+    await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
+
+    if (!global.db.users) global.db.users = {};
+    if (!global.db.users[m.sender]) global.db.users[m.sender] = {};
+
+    let user = new Proxy(global.db.users[m.sender], {
+        get(target, prop) {
+            if (!(prop in target)) target[prop] = 0;
+            return target[prop];
+        }
+    });
+
+    function formatMoney(amount) {
+        return '$' + amount.toLocaleString('id-ID');
+    }
+
+    const stamina = user.stamina || 0;
+    const money = formatMoney(user.money) || 0;
+    const exp = user.exp || 0;
+    const level = user.level || 1;
+    const order = user.order || 0;
+    const role = user.role || 'Bronze';
+    const expRequired = 10 * Math.pow(level, 2) + 50 * level + 100;
+
+    const categories = {
+        Masakan: {
+            steak: user.steak, sate: user.sate, rendang: user.rendang, kornet: user.kornet,
+            nugget: user.nugget, bluefin: user.bluefin, seafood: user.seafood, moluska: user.moluska,
+            sushi: user.sushi, squidprawm: user.squidprawm
+        },
+        Bumbu: {
+            kemiri: user.kemiri, bawang: user.bawang, cabai: user.cabai,
+            saus: user.saus, asam: user.asam, jahe: user.jahe
+        },
+        Buah: {
+            anggur: user.anggur, apel: user.apel, jeruk: user.jeruk,
+            mangga: user.mangga, pisang: user.pisang
+        },
+        Sayur: {
+            tomat: user.tomat, kubis: user.kubis, labu: user.labu,
+            kentang: user.kentang, terong: user.terong, wortel: user.wortel
+        },
+        Trash: {
+            daun: user.daun, kardus: user.kardus, kaleng: user.kaleng,
+            kayu: user.kayu, plastik: user.plastik, trash: user.trash
+        },
+        Tambang: {
+            diamond: user.diamond, iron: user.iron, gold: user.gold,
+            emerald: user.emerald
+        },
+        Kolam: {
+            tongkol: user.tongkol, pausmini: user.pausmini, kepiting: user.kepiting,
+            buntal: user.buntal, udang: user.udang, cumi: user.cumi, gurita: user.gurita,
+            nila: user.nila, langka: user.langka, kerang: user.kerang
+        },
+        Hewan: {
+            ayam: user.ayam, babi: user.babi, babihutan: user.babihutan,
+            banteng: user.banteng, buaya: user.buaya, gajah: user.gajah,
+            harimau: user.harimau, kerbau: user.kerbau, monyet: user.monyet,
+            panda: user.panda, sapi: user.sapi
+        },
+        'Space Items': {
+            meteorit: user.meteorit, crystal: user.crystal, metal: user.metal,
+            stardust: user.stardust, alien_artifact: user.alien_artifact,
+            moon_rock: user.moon_rock, unknown_substance: user.unknown_substance
+        }
+    };
+
+    const weaponsAndArmor = {
+        sword: { count: user.sword, durability: user.durabilitiesSword },
+        bow: { count: user.bow, durability: user.durabilitiesBow },
+        pickaxe: { count: user.pickaxe, durability: user.durabilitiesPickaxe },
+        axe: { count: user.axe, durability: user.durabilitiesAxe },
+        armor: { count: user.armor, durability: user.durabilitiesArmor },
+        fishingrod: { count: user.fishingrod, durability: user.durabilitiesFishingrod }
+    };
+
+    let inventoryText = `*Stamina:* ${stamina}/100\n`;
+    inventoryText += `*Money:* ${money}\n`;
+    inventoryText += `*Exp:* ${exp} / ${expRequired}\n`;
+    inventoryText += `*Role:* ${role}\n`;
+    inventoryText += `*Orderan:* ${order}\n\n`;
+
+    for (let [title, items] of Object.entries(categories)) {
+        inventoryText += `*${title.toUpperCase()}*\n`;
+        for (let [item, count] of Object.entries(items)) {
+            const formattedItem = item.charAt(0).toUpperCase() + item.slice(1).replace('_', ' ');
+            inventoryText += `- ${formattedItem}: ${count}\n`;
+        }
+        inventoryText += `\n`;
+    }
+
+    let weaponText = '*WEAPON & ARMOR*\n';
+    for (let [item, { count, durability }] of Object.entries(weaponsAndArmor)) {
+        const formattedItem = item.charAt(0).toUpperCase() + item.slice(1);
+        weaponText += `- ${formattedItem}: ${count} (Durability: ${durability})\n`;
+    }
+    inventoryText += weaponText;
+
+    let profilePicUrl = setting.cover;
+    try {
+        const profilePic = await erlic.profilePictureUrl(m.sender, 'image');
+        if (profilePic) profilePicUrl = profilePic;
+    } catch (e) {
+        // console.log('Gagal ambil foto profil, pakai default.');
+    }
+
+    await erlic.sendMessage(m.chat, {
+        text: inventoryText,
+        contextInfo: {
+            externalAdReply: {
+                title: `INVENTORY - ${m.pushName ? m.pushName.toUpperCase() : users.name}`,
+                body: global.header,
+                mediaType: 1,
+                renderLargerThumbnail: true,
+                thumbnailUrl: profilePicUrl,
+                sourceUrl: ''
+            }
+        }
+    }, { quoted: func.fstatus("INVENTORY") });
+
+    break;
+}
+    
+case 'gudang': {
+    if (!global.db.users) global.db.users = {};
+    if (!global.db.users[m.sender]) {
+        global.db.users[m.sender] = new Proxy({}, {
+            get(target, prop) {
+                if (!(prop in target)) target[prop] = 0;
+                return target[prop];
+            },
+            set(target, prop, value) {
+                target[prop] = value;
+                return true;
+            }
+        });
+    }
+
+    const user = global.db.users[m.sender];
+
+    const { 
+        pisang, anggur, mangga, jeruk, apel, 
+        bibitanggur, bibitapel, bibitpisang, bibitmangga, bibitjeruk,
+        wortel, kentang, tomat, kubis, terong, labu,
+        bibitwortel, bibitkentang, bibittomat, bibitkubis, bibitterong, bibitlabu
+    } = user;
+
+    const gudangInfo = `*HASIL PANEN BUAH*
+🍌 = *[ ${pisang || 0} ]* Buah Pisang
+🍇 = *[ ${anggur || 0 } ]* Buah Anggur
+🥭 = *[ ${mangga || 0} ]* Buah Mangga
+🍊 = *[ ${jeruk || 0} ]* Buah Jeruk
+🍎 = *[ ${apel || 0} ]* Buah Apel    
+
+*HASIL PANEN SAYUR*
+🥕 = *[ ${wortel || 0} ]* Wortel
+🥔 = *[ ${kentang||0} ]* Kentang
+🍅 = *[ ${tomat||0} ]* Tomat
+🥬 = *[ ${kubis||0} ]* Kubis
+🍆 = *[ ${terong||0} ]* Terong
+🎃 = *[ ${labu||0} ]* Labu
+
+*BIBIT BUAH*
+🌾 = *[ ${bibitpisang||0} ]* Bibit Pisang
+🌾 = *[ ${bibitanggur||0} ]* Bibit Anggur
+🌾 = *[ ${bibitmangga||0} ]* Bibit Mangga
+🌾 = *[ ${bibitjeruk||0} ]* Bibit Jeruk
+🌾 = *[ ${bibitapel||0} ]* Bibit Apel    
+
+*BIBIT SAYUR*
+🌱 = *[ ${bibitwortel||0} ]* Bibit Wortel
+🌱 = *[ ${bibitkentang||0} ]* Bibit Kentang
+🌱 = *[ ${bibittomat||0} ]* Bibit Tomat
+🌱 = *[ ${bibitkubis||0} ]* Bibit Kubis
+🌱 = *[ ${bibitterong||0} ]* Bibit Terong
+🌱 = *[ ${bibitlabu||0} ]* Bibit Labu
+
+> Ketik: ${setting.prefix}sell item count untuk menjual buah atau sayur.
+> Contoh: ${setting.prefix}sell pisang 50`;
+
+    erlic.sendMessage(m.chat, {
+        text: gudangInfo,
+        contextInfo: {
+            externalAdReply: {
+                title: '乂 G U D A N G',
+                body: global.header,
+                thumbnailUrl: 'https://files.catbox.moe/qvla2i.jpg',
+                sourceUrl: '',
+                mediaType: 1,
+                renderLargeThumbnail: true
+            }
+        }
+    }, { quoted: m });
+}
+break;
+    
+case 'create': {
+    if (!global.db.users) global.db.users = {};
+    if (!global.db.users[m.sender]) {
+        global.db.users[m.sender] = new Proxy({}, {
+            get(target, prop) {
+                if (!(prop in target)) {
+                    
+                    if (['stamina','money','exp','plastik','rock','kardus','kaleng','daun','trash','string'].includes(prop)) return 0;
+                    if (['sword','armor','bow','axe','pickaxe','fishingrod','atm'].includes(prop)) return 0;
+                    if (['durabilitiesSword','durabilitiesArmor','durabilitiesBow','durabilitiesAxe','durabilitiesPickaxe','durabilitiesFishingrod'].includes(prop)) return 0;
+         
+                    return null;
+                }
+                return target[prop];
+            },
+            set(target, prop, value) {
+                target[prop] = value;
+                return true;
+            }
+        });
+    }
+
+    const user = global.db.users[m.sender];
+    if (!user.register) return erlic.sendMessage(m.chat, { text: 'User tidak ditemukan di database. Pastikan Anda sudah terdaftar!' }, { quoted: m });
+
+    const isPremium = user.premium || false;
+
+    const items = {
+        sword: { materials: { rock: 50, kayu: 100 }, money: 15000 },
+        pickaxe: { materials: { rock: 65, kayu: 120 }, money: 15000 },
+        bow: { materials: { rock: 55, kayu: 125, string: 80 }, money: 20000 },
+        axe: { materials: { rock: 125, kayu: 150 }, money: 15000 },
+        armor: { materials: { iron: 10, string: 50 }, money: 20000 },
+        fishingrod: { materials: { kayu: 100, string: 60 }, money: 150000 },
+        atm: { materials: {}, money: 100000 },
+    };
+
+    const args = text.split(/\s+/);
+    const itemName = args[0]?.toLowerCase();
+    const count = parseInt(args[1], 10) || 1;
+
+    if (!items[itemName] && itemName !== 'hunt') return erlic.sendMessage(m.chat, { text: `Item "${itemName}" tidak ditemukan!` }, { quoted: m });
+
+    if (itemName === 'atm' && user.kuli) return erlic.sendMessage(m.chat, { text: 'Kamu sudah memiliki ATM!' }, { quoted: m });
+
+    if (itemName === 'hunt') {
+        const requiredItems = ['armor', 'sword', 'bow'];
+        let totalMoneyCost = 0;
+        let totalMaterials = {};
+
+        for (const item of requiredItems) {
+            const multiplier = isPremium ? { material: 3, money: 2 } : { material: 1, money: 1 };
+            totalMoneyCost += items[item].money * multiplier.money;
+            for (const [mat, qty] of Object.entries(items[item].materials)) {
+                totalMaterials[mat] = (totalMaterials[mat] || 0) + qty * multiplier.material;
+            }
+        }
+
+        if (user.money < totalMoneyCost) return erlic.sendMessage(m.chat, { text: `Uang kamu tidak cukup untuk membeli perlengkapan berburu!\nDibutuhkan: *$${totalMoneyCost}*\nSaldo kamu: *$${user.money}*` }, { quoted: m });
+
+        for (const [mat, qty] of Object.entries(totalMaterials)) {
+            if ((user[mat] || 0) < qty) return erlic.sendMessage(m.chat, { text: `Bahan *${mat}* tidak cukup!\nDibutuhkan: *${qty}*\nKamu punya: *${user[mat] || 0}*` }, { quoted: m });
+        }
+
+        user.money -= totalMoneyCost;
+        for (const [mat, qty] of Object.entries(totalMaterials)) user[mat] -= qty;
+
+        for (const item of requiredItems) user[item] = (user[item] || 0) + 1;
+        user.durabilitiesSword = (user.durabilitiesSword || 0) + 100;
+        user.durabilitiesArmor = (user.durabilitiesArmor || 0) + 100;
+        user.durabilitiesBow = (user.durabilitiesBow || 0) + 100;
+
+        return erlic.sendMessage(m.chat, { text: `Berhasil membuat perlengkapan berburu!\n+1 *Armor*\n+1 *Sword*\n+1 *Bow*` }, { quoted: m });
+    }
+
+    const foundItem = items[itemName];
+    const multiplier = isPremium ? { material: 3, money: 2 } : { material: 1, money: 1 };
+    const totalMoneyCost = foundItem.money * count * multiplier.money;
+
+    if (user.money < totalMoneyCost) return erlic.sendMessage(m.chat, { text: `Uang kamu tidak cukup untuk membuat ${itemName} x${count}.\nDibutuhkan: *$${totalMoneyCost}*\nSaldo kamu: *$${user.money}*` }, { quoted: m });
+
+    for (const [mat, qty] of Object.entries(foundItem.materials)) {
+        const requiredQty = qty * count * multiplier.material;
+        if ((user[mat] || 0) < requiredQty) return erlic.sendMessage(m.chat, { text: `Bahan *${mat}* tidak cukup!\nDibutuhkan: *${requiredQty}*\nKamu punya: *${user[mat] || 0}*` }, { quoted: m });
+    }
+
+    user.money -= totalMoneyCost;
+    for (const [mat, qty] of Object.entries(foundItem.materials)) user[mat] -= qty * count * multiplier.material;
+    user[itemName] = (user[itemName] || 0) + count;
+
+    const durability = 100;
+    if (itemName === 'sword') user.durabilitiesSword = (user.durabilitiesSword || 0) + durability * count;
+    if (itemName === 'armor') user.durabilitiesArmor = (user.durabilitiesArmor || 0) + durability * count;
+    if (itemName === 'bow') user.durabilitiesBow = (user.durabilitiesBow || 0) + durability * count;
+    if (itemName === 'axe') user.durabilitiesAxe = (user.durabilitiesAxe || 0) + durability * count;
+    if (itemName === 'pickaxe') user.durabilitiesPickaxe = (user.durabilitiesPickaxe || 0) + durability * count;
+    if (itemName === 'fishingrod') user.durabilitiesFishingrod = (user.durabilitiesFishingrod || 0) + durability * count;
+
+    if (itemName === 'atm') user.kuli = true;
+
+    return erlic.sendMessage(m.chat, { text: `Berhasil membuat *${count} ${itemName.charAt(0).toUpperCase() + itemName.slice(1)}*!` }, { quoted: m });
+}
+break;
+    
+case 'kandang': {
+    const user = global.db.users[m.sender];
+    const { banteng, harimau, gajah, kambing, panda, buaya, kerbau, sapi, monyet, babi, babihutan, ayam } = user;
+
+    const ndy = `- 🐂 = *[ ${banteng} ]* Ekor Banteng
+- 🐅 = *[ ${harimau ||0} ]* Ekor Harimau
+- 🐘 = *[ ${gajah||0} ]* Ekor Gajah
+- 🐐 = *[ ${kambing||0} ]* Ekor Kambing
+- 🐼 = *[ ${panda||0} ]* Ekor Panda
+- 🐊 = *[ ${buaya||0} ]* Ekor Buaya
+- 🐃 = *[ ${kerbau||0} ]* Ekor Kerbau
+- 🐮 = *[ ${sapi||0} ]* Ekor Sapi
+- 🐒 = *[ ${monyet||0} ]* Ekor Monyet
+- 🐗 = *[ ${babihutan||0} ]* Ekor Babi Hutan
+- 🐖 = *[ ${babi||0} ]* Ekor Babi
+- 🐓 = *[ ${ayam||0} ]* Ekor Ayam`;
+
+    erlic.sendMessage(
+      m.chat,
+      {
+        text: ndy,
+        contextInfo: {
+          externalAdReply: {
+            title: '乂 K A N D A N G',
+            body: global.header,
+            mediaType: 1,
+            renderLargeThumbnail: true,
+            thumbnailUrl: 'https://files.catbox.moe/ptbfe4.jpg'
+          }
+        }
+      },
+      { quoted: m }
+    );
+}
+break;
+    
+case 'adv':
+case 'adventure': {
+    const cooldownFree = 1800000;
+    const cooldownPremium = 600000;
+
+    if (!global.db.users) global.db.users = {};
+
+    function inisialisasi(sender) {
+        if (!global.db.users[sender]) {
+            global.db.users[sender] = new Proxy({}, {
+                get(target, prop) {
+                    if (!(prop in target)) target[prop] = 0;
+                    return target[prop];
+                },
+                set(target, prop, value) {
+                    target[prop] = value;
+                    return true;
+                }
+            });
+        }
+        return global.db.users[sender];
+    }
+
+    function initRewards(user) {
+        const fields = ['stamina','money','exp','plastik','rock','kardus','kaleng','daun','trash','string','lastadventure'];
+        for (const f of fields) {
+            if (user[f] === undefined || user[f] === null) user[f] = f === 'stamina' ? 100 : 0;
+        }
+    }
+
+    const user = inisialisasi(m.sender);
+    initRewards(user);
+
+    if (!user.register) {
+        return erlic.sendMessage(m.chat, { text: 'User tidak ditemukan di database. Pastikan anda sudah melakukan registrasi!' }, { quoted: m });
+    }
+
+    if (user.stamina < 20) {
+        return erlic.sendMessage(m.chat, { text: `Stamina kurang dari 20. Gunakan command *${global.db.settings?.prefix || '.'}heal*.` }, { quoted: m });
+    }
+
+    const cooldown = user.premium ? cooldownPremium : cooldownFree;
+    const timeElapsed = Date.now() - (user.lastadventure || 0);
+
+    if (timeElapsed < cooldown) {
+        const remainingTime = cooldown - timeElapsed;
+        return erlic.sendMessage(m.chat, { text: `Tunggu *${func.msToTime(remainingTime)}* lagi untuk petualangan berikutnya.` }, { quoted: m });
+    }
+
+    user.lastadventure = Date.now();
+    user.stamina -= 5;
+
+    await erlic.sendMessage(m.chat, { text: "_Petualangan dimulai..._" }, { quoted: m });
+    await new Promise(resolve => setTimeout(resolve, 10000));
+
+    const minRange = user.premium ? 100 : 0;
+    const maxRange = user.premium ? 5000 : 200;
+
+    const rewards = {
+        money: Math.floor(Math.random() * (8000 - 2000 + 1)) + 2000,
+        exp: Math.floor(Math.random() * (7000 - 1000 + 1)) + 1000,
+        plastik: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
+        rock: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
+        kardus: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
+        kaleng: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
+        daun: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
+        trash: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
+        string: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange
+    };
+
+    for (let key in rewards) user[key] += rewards[key];
+
+    let rewardMessage = `乂 *RPG - ADVENTURE*\n\n` +
+        `Stamina: ${user.stamina}/100\n` +
+        `EXP: ${rewards.exp}\n` +
+        `Money: $${rewards.money}\n\n` +
+        `Plastik: ${rewards.plastik}\n` +
+        `Rock: ${rewards.rock}\n` +
+        `Kardus: ${rewards.kardus}\n` +
+        `Kaleng: ${rewards.kaleng}\n` +
+        `Daun: ${rewards.daun}\n` +
+        `Trash: ${rewards.trash}\n` +
+        `String: ${rewards.string}`;
+
+    erlic.sendMessage(m.chat, { text: rewardMessage }, { quoted: m });
+}
+break;
+    
+case 'berburu':
+case 'hunt': {
+    const cooldownPremium = 10 * 60 * 1000;
+    const cooldownFree = 30 * 60 * 1000;
+
+    if (!global.db.users) global.db.users = {};
+
+    function inisialisasi(sender) {
+        if (!global.db.users[sender]) {
+            global.db.users[sender] = new Proxy({}, {
+                get(target, prop) {
+                    if (!(prop in target)) {
+                        if (['register','premium'].includes(prop)) target[prop] = false;
+                        else if (prop === 'stamina') target[prop] = 100;
+                        else target[prop] = 0;
+                    }
+                    return target[prop];
+                },
+                set(target, prop, value) {
+                    target[prop] = value;
+                    return true;
+                }
+            });
+        }
+        return global.db.users[sender];
+    }
+
+    const user = inisialisasi(m.sender);
+
+    if (!user.register) return erlic.sendMessage(m.chat, { text: 'User tidak ditemukan di database. Pastikan anda sudah terdaftar!' }, { quoted: m });
+    if (user.stamina < 30) return erlic.sendMessage(m.chat, { text: `Stamina kamu kurang dari 30. Gunakan command *${setting.prefix}heal*.` }, { quoted: m });
+
+    const requiredItems = ['sword','bow','armor'];
+    let missingItems = [];
+    let ownedItems = [];
+
+    requiredItems.forEach(item => {
+        if (!user[item] || user[item] <= 0) missingItems.push(item);
+        else ownedItems.push(`${item.charAt(0).toUpperCase() + item.slice(1)}: ${user[item]}`);
+    });
+
+    if (missingItems.length > 0) {
+        let missingItemsText = missingItems.map(item => {
+            if (item === 'sword') return '⚔️ Sword';
+            if (item === 'bow') return '🏹 Bow';
+            if (item === 'armor') return '🥼 Armor';
+        }).join('\n');
+        let ownedItemsText = ownedItems.length > 0 ? `\n\nKamu hanya memiliki:\n${ownedItems.join('\n')}` : '';
+        let teks = `Kamu kekurangan alat untuk berburu:\n${missingItemsText}\n\nSilahkan buat terlebih dahulu dengan command:\n${setting.prefix}create *item count*\nContoh:\n${setting.prefix}create bow 1` + ownedItemsText;
+        return erlic.sendMessage(m.chat, { text: teks }, { quoted: m });
+    }
+
+    const cooldown = user.premium ? cooldownPremium : cooldownFree;
+    if (Date.now() - (user.lastberburu || 0) < cooldown) {
+        const remainingTime = cooldown - (Date.now() - (user.lastberburu || 0));
+        return erlic.sendMessage(m.chat, { text: `Kamu sudah berburu, tunggu *${func.msToTime(remainingTime)}* lagi.` }, { quoted: m });
+    }
+
+    user.lastberburu = Date.now();
+    user.stamina -= 5;
+
+    ['Sword','Bow','Armor'].forEach(tool => {
+        const durKey = `durabilities${tool}`;
+        const itemKey = tool.toLowerCase();
+        if (user[durKey] > 0) {
+            user[durKey] -= 5;
+            if (user[durKey] <= 0) delete user[itemKey];
+        }
+    });
+
+    await erlic.sendMessage(m.chat, { text: '_Pemburuan dimulai..._' }, { quoted: m });
+
+    setTimeout(() => {
+        const animals = ['banteng','harimau','gajah','kambing','panda','buaya','kerbau','sapi','monyet','babi','babihutan','ayam'];
+        let randomResults = Array.from({ length: animals.length }, () => Math.floor(Math.random() * 10));
+        let rewards = randomResults.map(n => n * (user.premium ? 5 : 1));
+
+        animals.forEach((animal, idx) => {
+            user[animal] = (user[animal] || 0) + rewards[idx];
+        });
+
+        let hsl = `乂 *RPG - BERBURU*\n\nSisa stamina: ${user.stamina} / 100\nDurability:\n- Armor: ${user.durabilitiesArmor || 0}\n- Sword: ${user.durabilitiesSword || 0}\n- Bow: ${user.durabilitiesBow || 0}\n\nHasil berburu ${m.pushname}\n` +
+            `🐂 Banteng = ${rewards[0]}        🐃 Kerbau = ${rewards[6]}\n` +
+            `🐅 Harimau = ${rewards[1]}       🐮 Sapi = ${rewards[7]}\n` +
+            `🐘 Gajah = ${rewards[2]}         🐒 Monyet = ${rewards[8]}\n` +
+            `🐐 Kambing = ${rewards[3]}        🐗 Babi = ${rewards[9]}\n` +
+            `🐼 Panda = ${rewards[4]}         🐖 Babi Hutan = ${rewards[10]}\n` +
+            `🐊 Buaya = ${rewards[5]}         🐓 Ayam = ${rewards[11]}\n\n` +
+            `> Ketik: ${setting.prefix}kandang untuk melihat hasilnya.`;
+
+        erlic.sendMessage(
+            m.chat,
+            {
+                text: hsl,
+                contextInfo: {
+                    externalAdReply: {
+                        title: 'B E R B U R U',
+                        body: global.header,
+                        mediaType: 1,
+                        renderLargerThumbnail: true,
+                        thumbnailUrl: 'https://files.catbox.moe/tqqogh.jpg'
+                    }
+                }
+            },
+            { quoted: m }
+        );
+    }, 10000);
+}
+break;
+    
+case 'berkebun': {
+    
+    function padZero(num) {
+        return num < 10 ? '0' + num : num;
+    }
+    
+    function formatCooldown(ms) {
+        const hours = Math.floor(ms / 3600000);
+        const minutes = Math.floor((ms % 3600000) / 60000);
+        const seconds = Math.floor((ms % 60000) / 1000);
+        return `${padZero(hours)}:${padZero(minutes)}:${padZero(seconds)}`;
+    }
+
+    if (!global.db.users) global.db.users = {};
+    if (!global.db.users[m.sender]) global.db.users[m.sender] = {};
+
+    let sender = global.db.users[m.sender];
+
+    sender = new Proxy(sender, {
+        get(target, prop) {
+            if (!(prop in target)) target[prop] = 0;
+            return target[prop];
+        },
+        set(target, prop, value) {
+            target[prop] = value;
+            return true;
+        }
+    });
+
+    if (!sender.register) {
+        return erlic.sendMessage(m.chat, { text: 'User tidak ditemukan dalam database. Pastikan Anda sudah terdaftar!' }, { quoted: m });
+    }
+
+    const bibitList = [
+        { name: 'apel', count: sender.bibitapel },
+        { name: 'anggur', count: sender.bibitanggur },
+        { name: 'mangga', count: sender.bibitmangga },
+        { name: 'jeruk', count: sender.bibitjeruk },
+        { name: 'pisang', count: sender.bibitpisang },
+        { name: 'wortel', count: sender.bibitwortel },
+        { name: 'kentang', count: sender.bibitkentang },
+        { name: 'tomat', count: sender.bibittomat },
+        { name: 'kubis', count: sender.bibitkubis },
+        { name: 'terong', count: sender.bibitterong },
+        { name: 'labu', count: sender.bibitlabu }
+    ];
+
+    let kurangMessage = 'Bibit kamu tidak mencukupi untuk berkebun:\n';
+    let allSufficient = true;
+    for (let bibit of bibitList) {
+        if (bibit.count < 1) {
+            kurangMessage += `- Bibit ${bibit.name}: ${bibit.count}\n`;
+            allSufficient = false;
+        }
+    }
+
+    if (!allSufficient) {
+        return erlic.sendMessage(m.chat, {
+            text: `${kurangMessage}\n> Ketik ${setting.prefix}buybibit untuk membeli bibit.`,
+            contextInfo: { mentionedJid: [m.sender] }
+        }, { quoted: m });
+    }
+
+    const cooldown = 30 * 60 * 1000;
+    if (Date.now() - sender.lastberkebun < cooldown) {
+        return erlic.sendMessage(m.chat, {
+            text: `Kamu sudah berkebun, mohon tunggu *${formatCooldown(cooldown - (Date.now() - sender.lastberkebun))}* untuk bisa *berkebun* lagi.`,
+            contextInfo: { mentionedJid: [m.sender] }
+        }, { quoted: m });
+    }
+
+    const hadiahExp = Math.floor(Math.random() * 991) + 10;
+    const hasilBerkebun = {
+        apel: Math.floor(Math.random() * 501),
+        anggur: Math.floor(Math.random() * 501),
+        mangga: Math.floor(Math.random() * 501),
+        jeruk: Math.floor(Math.random() * 501),
+        pisang: Math.floor(Math.random() * 501),
+        wortel: Math.floor(Math.random() * 501),
+        kentang: Math.floor(Math.random() * 501),
+        tomat: Math.floor(Math.random() * 501),
+        kubis: Math.floor(Math.random() * 501),
+        terong: Math.floor(Math.random() * 501),
+        labu: Math.floor(Math.random() * 501)
+    };
+
+    sender.lastberkebun = Date.now();
+
+    sender.bibitapel -= 100;
+    sender.bibitanggur -= 100;
+    sender.bibitmangga -= 100;
+    sender.bibitjeruk -= 100;
+    sender.bibitpisang -= 100;
+    sender.bibitwortel -= 100;
+    sender.bibitkentang -= 100;
+    sender.bibittomat -= 100;
+    sender.bibitkubis -= 100;
+    sender.bibitterong -= 100;
+    sender.bibitlabu -= 100;
+
+    sender.apel += hasilBerkebun.apel;
+    sender.anggur += hasilBerkebun.anggur;
+    sender.mangga += hasilBerkebun.mangga;
+    sender.jeruk += hasilBerkebun.jeruk;
+    sender.pisang += hasilBerkebun.pisang;
+    sender.wortel += hasilBerkebun.wortel;
+    sender.kentang += hasilBerkebun.kentang;
+    sender.tomat += hasilBerkebun.tomat;
+    sender.kubis += hasilBerkebun.kubis;
+    sender.terong += hasilBerkebun.terong;
+    sender.labu += hasilBerkebun.labu;
+
+    sender.stamina -= 10;
+
+    return erlic.sendMessage(m.chat, {
+        text: `乂 *RPG BERKEBUN*\n\nSisa Stamina: ${sender.stamina} / 100\nExp: +${hadiahExp}\n\n🍎 Apel: +${hasilBerkebun.apel}\n🥭 Mangga: +${hasilBerkebun.mangga}\n🍊 Jeruk: +${hasilBerkebun.jeruk}\n🍌 Pisang: +${hasilBerkebun.pisang}\n🍇 Anggur: +${hasilBerkebun.anggur}\n\n🥕 Wortel: +${hasilBerkebun.wortel}\n🥔 Kentang: +${hasilBerkebun.kentang}\n🍅 Tomat: +${hasilBerkebun.tomat}\n🥬 Kubis: +${hasilBerkebun.kubis}\n🍆 Terong: +${hasilBerkebun.terong}\n🎃 Labu: +${hasilBerkebun.labu}\n\n> Ketik ${setting.prefix}gudang untuk melihat hasil panenmu.`,
+        contextInfo: {
+            externalAdReply: {
+                title: 'B E R K E B U N',
+                body: global.header,
+                thumbnailUrl: 'https://files.catbox.moe/daujyf.jpg',
+                sourceUrl: '',
+                mediaType: 1,
+                renderLargerThumbnail: true
+            }
+        }
+    }, { quoted: m });
+}
+break;
         
  case 'cekpanel': { const fs=require('fs'); const path=require('path'); const panelFile=path.join(__dirname,'./database/panel.json'); if(!fs.existsSync(panelFile)) return m.reply('Belum ada data panel.'); const rawData=fs.readFileSync(panelFile); const panelData=JSON.parse(rawData); const userPanels=panelData.filter(item=>item.jid===m.sender); if(userPanels.length<1) return m.reply('Your server is empty.'); function calculateExpireTime(expiredTimestamp){const now=Date.now();const diff=expiredTimestamp-now;const seconds=Math.floor((diff/1000)%60);const minutes=Math.floor((diff/(1000*60))%60);const hours=Math.floor((diff/(1000*60*60))%24);const days=Math.floor(diff/(1000*60*60*24)); return diff>0?`${days}D ${hours}H ${minutes}M ${seconds}S`:'Expired';} let caption='乂  *C H E C K - P A N E L*\n\n'; caption+=`◦  *Jid* : @${m.sender.replace(/@.+/,'')}\n`; caption+=`◦  *Total Server* : ${userPanels.length}\n`; caption+=`*Server* :\n`; caption+=userPanels.map((item,index)=>{const s=item.server; const ramDisplay=(Number(s.ram)===0)?'∞':`${s.ram}GB`; const expireTime=calculateExpireTime(new Date(s.expire).getTime()); return `${index+1}. ${s.username}\n- ID: ${s.id}\n- RAM: ${ramDisplay}\n- Expire: ${expireTime}`;}).join('\n\n'); erlic.sendMessage(m.chat,{text:caption,mentions:[m.sender]},{quoted:m}); } break;
         
@@ -7669,10 +9782,10 @@ case 'script': case 'sc': {
   if (harga >= 1_000) return (harga / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
   return harga.toString();
 };
- let hargaNormal = 100000; 
+ let hargaNormal = 60000; 
  try {
  const data = fs.readFileSync('./database/hargasc.json', 'utf8'); 
- const hargaData = JSON.parse(data);
+ const hargaData = setting.hargasc
  if (hargaData && hargaData.harga) {
  hargaNormal = hargaData.harga;
  }
@@ -7736,7 +9849,7 @@ try {
 - Min. 4GB RAM
 
 *Benefit:*
-- Free update if you buy normal price
+- Free update
 - Request Features (additional cost)
 - Fixing Features (additional cost)
 - Free server 1 month 
@@ -7756,7 +9869,7 @@ https://wa.me/6283840818197 (Dimas)${buyerListText}`;
  text: teks,
  contextInfo: {
  externalAdReply: {
- showAdAttribution: true,
+ showAdAttribution: false,
  }
  }
  }
@@ -7765,6 +9878,12 @@ https://wa.me/6283840818197 (Dimas)${buyerListText}`;
  }, { quoted: m });
 }
 break;
+    
+case 'upsc': { if (!isDev) return m.reply(mess.devs); const filePath = text.trim(); if (!filePath) return m.reply('Format salah!\nContoh: *.upsc erlic.js* atau *.upsc system/lib.js*'); const rawUrl = `https://api.github.com/repos/joo1alaricc/erlic/contents/${filePath}`; const quotedMessage = m.message?.extendedTextMessage?.contextInfo?.quotedMessage; const quotedKey = m.message?.extendedTextMessage?.contextInfo; if (!quotedMessage?.documentMessage) return m.reply('Reply file *.js* yang mau diupload!'); const mime = quotedMessage.documentMessage.mimetype || ''; const fileName = quotedMessage.documentMessage.fileName || ''; if (!/javascript/.test(mime) && !fileName.endsWith('.js')) return m.reply('File bukan JavaScript!'); const res = await axios.get(rawUrl, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); const oldFileContent = Buffer.from(res.data.content, 'base64'); const sha = res.data.sha; await erlic.sendMessage(m.sender, { document: oldFileContent, mimetype: 'application/javascript', fileName: 'backup-' + filePath.split('/').pop(), caption: `Ini backup \`${filePath}\` sebelum update.` }); const buffer = await downloadMediaMessage({ key: { remoteJid: m.chat, id: quotedKey.stanzaId, fromMe: quotedKey.participant === m.sender, participant: quotedKey.participant }, message: quotedMessage }, 'buffer', {}, { reuploadRequest: erlic }); await axios.put(rawUrl, { message: `Update file ${filePath} oleh ${m.sender}`, content: buffer.toString('base64'), sha }, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); m.reply(`File \`${filePath}\` berhasil diperbarui dan backup sudah dikirim!`); break; }
+    
+case 'upmenu': { if (!isDev) return m.reply(mess.devs); const filePath = 'database/menu.json'; const rawUrl = `https://api.github.com/repos/joo1alaricc/erlic/contents/${filePath}`; const quotedMessage = m.message?.extendedTextMessage?.contextInfo?.quotedMessage; const quotedKey = m.message?.extendedTextMessage?.contextInfo; if (!quotedMessage?.documentMessage) return m.reply('Reply file *.json* yang mau diupload sebagai `menu.json`!'); const mime = quotedMessage.documentMessage.mimetype || ''; const fileName = quotedMessage.documentMessage.fileName || ''; if (!/json/.test(mime) && !fileName.endsWith('.json')) return m.reply('File bukan JSON!'); const buffer = await downloadMediaMessage({ key: { remoteJid: m.chat, fromMe: quotedKey.participant === m.sender, id: quotedKey.stanzaId, participant: quotedKey.participant }, message: quotedMessage }, 'buffer', {}, { reuploadRequest: erlic }); const res = await axios.get(rawUrl, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); const sha = res.data.sha; await axios.put(rawUrl, { message: `Update menu.json oleh ${m.sender}`, content: buffer.toString('base64'), sha }, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); m.reply('`menu.json` berhasil diperbarui!'); break; }
+    
+case 'upversion': { if (!isDev) return m.reply(mess.devs); const version = text.trim(); const filePath = 'version.json'; const rawUrl = `https://api.github.com/repos/joo1alaricc/erlic/contents/${filePath}`; if (!version || !/^\d+(\.\d+){1,2}( .+)?$/.test(version)) return m.reply('Format versi tidak valid!\nContoh: *.upversion 1.2.0* atau *.upversion 2.0.0 Beta*'); const res = await axios.get(rawUrl, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); const sha = res.data.sha; const newData = { version }; await axios.put(rawUrl, { message: `Update version ke ${version} oleh ${m.sender}`, content: Buffer.from(JSON.stringify(newData, null, 2)).toString('base64'), sha }, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); m.reply(`Versi berhasil diperbarui ke *${version}*!`); break; }
        
 default:
 if (budy.startsWith('x ')) {
@@ -7804,7 +9923,7 @@ if (stdout) return m.reply(stdout)
 }
  
 if (budy.toLowerCase() === 'bot' || budy.toLowerCase() === global.botname.toLowerCase()) {
-  const prefa = require('./database/prefix.json');
+  const prefa = global.db.setting
   const ownerDisplay = Array.isArray(global.ownername) ? global.ownername.join(' x ') : global.ownername;
   const { performance } = require('perf_hooks');
 
@@ -7861,10 +9980,10 @@ if (budy.toLowerCase() === 'bot' || budy.toLowerCase() === global.botname.toLowe
     
 if (m.mentionedJid && m.mentionedJid.includes(erlic.decodeJid(erlic.user.id)) && m.sender !== erlic.decodeJid(erlic.user.id)) await erlic.sendMessage(m.chat, { text: `Hallo ${pushname}!\nAda yang bisa ${global.botname} bantu?` }, { quoted: m });
     
-if (m.mentionedJid && m.mentionedJid.some(jid => global.owner.some(owner => jid.replace(/@s\.whatsapp\.net$/, '') === owner))) {
+/* if (m.mentionedJid && m.mentionedJid.some(jid => global.owner.some(owner => jid.replace(/@s\.whatsapp\.net$/, '') === owner))) {
   if (m.fromMe) return;
   await erlic.sendMessage(m.chat, { text: `Jangan tag ownerku! Dia lagi sibuk.` }, { quoted: m });
-}
+} */
     
 if (
   (m.mtype === 'groupInviteMessage' ||
@@ -7875,7 +9994,7 @@ if (
   !isBot &&
   !isCreator
 ) {
-  const prefa = require('./database/prefix.json');
+  const prefa = global.db.setting
   let teks = `Halo, sepertinya Anda ingin mengundang bot ke grup Anda.
 
 ◦ 15 day - Rp 5k
@@ -7905,6 +10024,5 @@ Jika berminat hubungi: ${prefa.prefix}owner untuk order :)`;
 console.log(util.format(err))
 }
 }
-
 
 require('./system/functions.js').reloadFile(__filename);
