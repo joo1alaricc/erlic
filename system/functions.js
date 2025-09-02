@@ -73,17 +73,51 @@ func.fileSize = (bytes) => {
 };
     
 func.reloadFile = (file) => {
-    const fs = require('fs')
-    const chalk = require('chalk')
-    const moment = require('moment-timezone')
-    file = require.resolve(file)
+    const fs = require('fs');
+    const chalk = require('chalk');
+    const moment = require('moment-timezone');
+    const path = require('path');
+
+    file = require.resolve(file);
     fs.watchFile(file, () => {
-        fs.unwatchFile(file)
-        console.log(chalk.greenBright.bold('[ UPDATE ]'), chalk.whiteBright(moment(Date.now()).format('DD/MM/YY HH:mm:ss')), chalk.cyan.bold('➠ ' + path.basename(file)))
-        delete require.cache[file]
-        require(file)
-    })
-}
+        fs.unwatchFile(file);
+        console.log(
+            chalk.greenBright.bold('[ UPDATE ]'),
+            chalk.whiteBright(moment().tz('Asia/Jakarta').format('DD/MM/YY HH:mm:ss')),
+            chalk.cyan.bold('➠ ' + path.basename(file))
+        );
+        delete require.cache[file];
+        require(file);
+    });
+};
+
+func.reloadFile2 = (file) => {
+    const fs = require('fs');
+    const chalk = require('chalk');
+    const moment = require('moment-timezone');
+    const path = require('path');
+
+    if (!fs.existsSync(file)) {
+        console.log(
+            chalk.red.bold('[ DELETED ]'),
+            chalk.whiteBright(moment().tz('Asia/Jakarta').format('DD/MM/YY HH:mm:ss')),
+            chalk.yellow.bold('➠ ' + file)
+        );
+        return;
+    }
+
+    file = require.resolve(file);
+    fs.watchFile(file, () => {
+        fs.unwatchFile(file);
+        console.log(
+            chalk.red.bold('[ UPDATE ]'),
+            chalk.whiteBright(moment().tz('Asia/Jakarta').format('DD/MM/YY HH:mm:ss')),
+            chalk.yellow.bold('➠ ' + path.basename(file))
+        );
+        delete require.cache[file];
+        require(file);
+    });
+};
     
 func.filename = (ext) => {
     return `${Math.floor(Math.random() * 10000)}.${ext}`
