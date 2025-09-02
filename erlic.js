@@ -9915,84 +9915,91 @@ break;
     
 case 'upsc': {
     if (!isDev) return m.reply(mess.devs)
+    const quotedMessage = m.message?.extendedTextMessage?.contextInfo?.quotedMessage
+    const quotedKey = m.message?.extendedTextMessage?.contextInfo
+    if (!quotedMessage?.documentMessage) return m.reply('Reply semua file hasil backup!')
 
-    const quoted = m.message?.extendedTextMessage?.contextInfo?.quotedMessage
-    if (!quoted?.documentMessage) return m.reply('Reply file *.js/json* hasil backup script! (bisa banyak)')
+    const mime = quotedMessage.documentMessage.mimetype || ''
+    const fileName = quotedMessage.documentMessage.fileName || ''
+    if (!/zip|tar|gz|octet-stream|javascript|json/.test(mime)) return m.reply('File tidak valid!')
 
-    // Ambil semua pesan yang direply
-    const msgs = m.quoted ? [m.quoted] : []
-    if (m.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
-        msgs.push({ key: m.message.extendedTextMessage.contextInfo.stanzaId, message: quoted })
+    const owner = 'joo1alaricc'
+    const repo = 'erlic'
+    const branch = 'main'
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents`
+    const headers = {
+        Authorization: `token ${global.gitoken}`,
+        Accept: 'application/vnd.github.v3+json'
     }
 
-    // Ambil semua file dari reply
-    let localFiles = {}
-    for (const msg of msgs) {
-        const fileName = msg.message?.documentMessage?.fileName
-        if (!fileName) continue
-        const buffer = await downloadMediaMessage(
-            { key: { remoteJid: m.chat, id: msg.key?.id || m.key.id, fromMe: true }, message: msg.message },
-            'buffer',
-            {},
-            { reuploadRequest: erlic }
-        )
-        localFiles[fileName] = buffer
-    }
-
-    if (Object.keys(localFiles).length === 0) return m.reply('Tidak ada file valid yang direply!')
-
-    const repo = "joo1alaricc/erlic"
-    const apiBase = `https://api.github.com/repos/${repo}/contents`
-
-    // Ambil daftar file di GitHub
+    // === STEP 1: Ambil daftar file dari GitHub ===
     async function getRepoTree() {
-        const { data } = await axios.get(`https://api.github.com/repos/${repo}/git/trees/main?recursive=1`, {
-            headers: { Authorization: `token ${global.gitoken}` }
-        })
-        return data.tree.map(f => f.path)
+        const { data: ref } = await axios.get(`https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${branch}`, { headers })
+        const { data: commit } = await axios.get(ref.object.url, { headers })
+        const { data: tree } = await axios.get(`${commit.tree.url}?recursive=1`, { headers })
+        return tree.tree.filter(f => f.type === 'blob').map(f => ({ path: f.path, sha: f.sha }))
     }
 
-    let repoFiles = await getRepoTree()
+    // === STEP 2: Baca isi zip/document backup ===
+    const buffer = await downloadMediaMessage(
+        { key: { remoteJid: m.chat, id: quotedKey.stanzaId, fromMe: quotedKey.participant === m.sender, participant: quotedKey.participant }, message: quotedMessage },
+        'buffer', {}, { reuploadRequest: erlic }
+    )
 
-    // Upload / Update file dari backup
-    for (const [name, buffer] of Object.entries(localFiles)) {
-        if (name === 'version.json') continue // skip
-        const path = name.includes('/') ? name : name // tetap sesuai nama file / folder
+    const AdmZip = require('adm-zip')
+    const zip = new AdmZip(buffer)
+    const entries = zip.getEntries()
 
-        let sha = null
+    let githubFiles = await getRepoTree()
+    let updated = 0, created = 0, deleted = 0
+
+    // === STEP 3: Upload semua file dari backup ===
+    for (const entry of entries) {
+        if (entry.isDirectory) continue
+        if (entry.entryName === 'version.json') continue // skip version.json
+
+        const content = Buffer.from(entry.getData()).toString('base64')
+        const path = entry.entryName
+        const exists = githubFiles.find(f => f.path === path)
+
         try {
-            const { data } = await axios.get(`${apiBase}/${path}`, {
-                headers: { Authorization: `token ${global.gitoken}` }
-            })
-            sha = data.sha
-        } catch { }
-
-        await axios.put(`${apiBase}/${path}`, {
-            message: `Update file ${path} oleh ${m.sender}`,
-            content: buffer.toString('base64'),
-            sha: sha || undefined
-        }, {
-            headers: { Authorization: `token ${global.gitoken}` }
-        })
-    }
-
-    // Hapus file yang tidak ada di backup
-    for (const file of repoFiles) {
-        if (file === 'version.json') continue
-        if (!localFiles[file]) {
-            try {
-                const { data } = await axios.get(`${apiBase}/${file}`, {
-                    headers: { Authorization: `token ${global.gitoken}` }
-                })
-                await axios.delete(`${apiBase}/${file}`, {
-                    headers: { Authorization: `token ${global.gitoken}` },
-                    data: { message: `Hapus file ${file} oleh ${m.sender}`, sha: data.sha }
-                })
-            } catch { }
+            if (exists) {
+                // UPDATE file
+                await axios.put(`${apiUrl}/${path}`, {
+                    message: `Update ${path} via upsc oleh ${m.sender}`,
+                    content, sha: exists.sha, branch
+                }, { headers })
+                updated++
+            } else {
+                // CREATE file
+                await axios.put(`${apiUrl}/${path}`, {
+                    message: `Tambah ${path} via upsc oleh ${m.sender}`,
+                    content, branch
+                }, { headers })
+                created++
+            }
+        } catch (e) {
+            console.error(`Gagal upload ${path}:`, e.response?.data || e.message)
         }
     }
 
-    m.reply(`Sinkronisasi selesai!\n${Object.keys(localFiles).length} file diperbarui/ditambah.\nFile lain dihapus (kecuali version.json).`)
+    // === STEP 4: Hapus file yang ada di GitHub tapi tidak ada di backup ===
+    for (const f of githubFiles) {
+        if (f.path === 'version.json') continue
+        if (!entries.find(e => e.entryName === f.path)) {
+            try {
+                await axios.delete(`${apiUrl}/${f.path}`, {
+                    headers,
+                    data: { message: `Hapus ${f.path} via upsc oleh ${m.sender}`, sha: f.sha, branch }
+                })
+                deleted++
+            } catch (e) {
+                console.error(`Gagal hapus ${f.path}:`, e.response?.data || e.message)
+            }
+        }
+    }
+
+    m.reply(`Sinkronisasi selesai!\nUpdated: ${updated}\nCreated: ${created}\nDeleted: ${deleted}`)
     break
 }
     
