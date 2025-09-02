@@ -4315,27 +4315,61 @@ case 'getfile': case 'gf': {
   const fs = require('fs');
   if (!isCreator) return m.reply(mess.owner);
   if (!text) return m.reply(func.example(command, 'config.js'));
+
   await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
+
   let fileName = text.trim();
-  let filePath = path.join(process.cwd(), fileName);
-  if (!fs.existsSync(filePath)) {
-    return m.reply(`File *${fileName}* tidak ditemukan!`);
+  let baseDir = process.cwd();
+  let filePath = path.resolve(baseDir, fileName);
+
+  // pastikan tidak bisa akses keluar project
+  if (!filePath.startsWith(baseDir)) {
+    return m.reply('Akses file di luar folder project tidak diizinkan!');
   }
-  let ext = path.extname(fileName);
-  let mime = ext === '.js' ? 'text/javascript' :
-             ext === '.json' ? 'application/json' :
-             ext === '.txt' ? 'text/plain' :
-             'application/octet-stream';
-  await erlic.sendMessage(
-    m.chat,
-    {
-      document: fs.readFileSync(filePath),
-      fileName: fileName,
-      mimetype: mime,
-      caption: `Berikut adalah isi file *${fileName}*`,
-    },
-    { quoted: m }
-  );
+
+  // kalau tanpa ekstensi, coba tambahin .js, .json, .txt
+  if (!path.extname(filePath)) {
+    const possibleExt = ['.js', '.json', '.txt'];
+    for (let ext of possibleExt) {
+      if (fs.existsSync(filePath + ext)) {
+        filePath = filePath + ext;
+        break;
+      }
+    }
+  }
+
+  // cek apakah ada
+  if (!fs.existsSync(filePath)) {
+    return m.reply(`File atau folder *${fileName}* tidak ditemukan!`);
+  }
+
+  let stat = fs.statSync(filePath);
+
+  if (stat.isDirectory()) {
+    // kalau folder → kirim daftar isinya
+    let files = fs.readdirSync(filePath).map(f => {
+      let s = fs.statSync(path.join(filePath, f));
+      return `${s.isDirectory() ? '[DIR]' : '[FILE]'} ${f}`;
+    }).join('\n');
+    return m.reply(`Isi folder *${fileName}*:\n\n${files}`);
+  } else {
+    // kalau file → kirim sebagai dokumen
+    let ext = path.extname(filePath);
+    let mime = ext === '.js' ? 'text/javascript' :
+               ext === '.json' ? 'application/json' :
+               ext === '.txt' ? 'text/plain' :
+               'application/octet-stream';
+    await erlic.sendMessage(
+      m.chat,
+      {
+        document: fs.readFileSync(filePath),
+        fileName: path.basename(filePath),
+        mimetype: mime,
+        caption: `Berikut adalah isi file *${fileName}*`,
+      },
+      { quoted: m }
+    );
+  }
   break;
 }
         
@@ -9879,11 +9913,92 @@ https://wa.me/6283840818197 (Dimas)${buyerListText}`;
 }
 break;
     
-case 'upsc': { if (!isDev) return m.reply(mess.devs); const filePath = text.trim(); if (!filePath) return m.reply('Format salah!\nContoh: *.upsc erlic.js* atau *.upsc system/lib.js*'); const rawUrl = `https://api.github.com/repos/joo1alaricc/erlic/contents/${filePath}`; const quotedMessage = m.message?.extendedTextMessage?.contextInfo?.quotedMessage; const quotedKey = m.message?.extendedTextMessage?.contextInfo; if (!quotedMessage?.documentMessage) return m.reply('Reply file *.js* yang mau diupload!'); const mime = quotedMessage.documentMessage.mimetype || ''; const fileName = quotedMessage.documentMessage.fileName || ''; if (!/javascript/.test(mime) && !fileName.endsWith('.js')) return m.reply('File bukan JavaScript!'); const res = await axios.get(rawUrl, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); const oldFileContent = Buffer.from(res.data.content, 'base64'); const sha = res.data.sha; await erlic.sendMessage(m.sender, { document: oldFileContent, mimetype: 'application/javascript', fileName: 'backup-' + filePath.split('/').pop(), caption: `Ini backup \`${filePath}\` sebelum update.` }); const buffer = await downloadMediaMessage({ key: { remoteJid: m.chat, id: quotedKey.stanzaId, fromMe: quotedKey.participant === m.sender, participant: quotedKey.participant }, message: quotedMessage }, 'buffer', {}, { reuploadRequest: erlic }); await axios.put(rawUrl, { message: `Update file ${filePath} oleh ${m.sender}`, content: buffer.toString('base64'), sha }, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); m.reply(`File \`${filePath}\` berhasil diperbarui dan backup sudah dikirim!`); break; }
+case 'upsc': {
+    if (!isDev) return m.reply(mess.devs)
+
+    const quoted = m.message?.extendedTextMessage?.contextInfo?.quotedMessage
+    if (!quoted?.documentMessage) return m.reply('Reply file *.js/json* hasil backup script! (bisa banyak)')
+
+    // Ambil semua pesan yang direply
+    const msgs = m.quoted ? [m.quoted] : []
+    if (m.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
+        msgs.push({ key: m.message.extendedTextMessage.contextInfo.stanzaId, message: quoted })
+    }
+
+    // Ambil semua file dari reply
+    let localFiles = {}
+    for (const msg of msgs) {
+        const fileName = msg.message?.documentMessage?.fileName
+        if (!fileName) continue
+        const buffer = await downloadMediaMessage(
+            { key: { remoteJid: m.chat, id: msg.key?.id || m.key.id, fromMe: true }, message: msg.message },
+            'buffer',
+            {},
+            { reuploadRequest: erlic }
+        )
+        localFiles[fileName] = buffer
+    }
+
+    if (Object.keys(localFiles).length === 0) return m.reply('Tidak ada file valid yang direply!')
+
+    const repo = "joo1alaricc/erlic"
+    const apiBase = `https://api.github.com/repos/${repo}/contents`
+
+    // Ambil daftar file di GitHub
+    async function getRepoTree() {
+        const { data } = await axios.get(`https://api.github.com/repos/${repo}/git/trees/main?recursive=1`, {
+            headers: { Authorization: `token ${global.gitoken}` }
+        })
+        return data.tree.map(f => f.path)
+    }
+
+    let repoFiles = await getRepoTree()
+
+    // Upload / Update file dari backup
+    for (const [name, buffer] of Object.entries(localFiles)) {
+        if (name === 'version.json') continue // skip
+        const path = name.includes('/') ? name : name // tetap sesuai nama file / folder
+
+        let sha = null
+        try {
+            const { data } = await axios.get(`${apiBase}/${path}`, {
+                headers: { Authorization: `token ${global.gitoken}` }
+            })
+            sha = data.sha
+        } catch { }
+
+        await axios.put(`${apiBase}/${path}`, {
+            message: `Update file ${path} oleh ${m.sender}`,
+            content: buffer.toString('base64'),
+            sha: sha || undefined
+        }, {
+            headers: { Authorization: `token ${global.gitoken}` }
+        })
+    }
+
+    // Hapus file yang tidak ada di backup
+    for (const file of repoFiles) {
+        if (file === 'version.json') continue
+        if (!localFiles[file]) {
+            try {
+                const { data } = await axios.get(`${apiBase}/${file}`, {
+                    headers: { Authorization: `token ${global.gitoken}` }
+                })
+                await axios.delete(`${apiBase}/${file}`, {
+                    headers: { Authorization: `token ${global.gitoken}` },
+                    data: { message: `Hapus file ${file} oleh ${m.sender}`, sha: data.sha }
+                })
+            } catch { }
+        }
+    }
+
+    m.reply(`Sinkronisasi selesai!\n${Object.keys(localFiles).length} file diperbarui/ditambah.\nFile lain dihapus (kecuali version.json).`)
+    break
+}
     
-case 'upmenu': { if (!isDev) return m.reply(mess.devs); const filePath = 'database/menu.json'; const rawUrl = `https://api.github.com/repos/joo1alaricc/erlic/contents/${filePath}`; const quotedMessage = m.message?.extendedTextMessage?.contextInfo?.quotedMessage; const quotedKey = m.message?.extendedTextMessage?.contextInfo; if (!quotedMessage?.documentMessage) return m.reply('Reply file *.json* yang mau diupload sebagai `menu.json`!'); const mime = quotedMessage.documentMessage.mimetype || ''; const fileName = quotedMessage.documentMessage.fileName || ''; if (!/json/.test(mime) && !fileName.endsWith('.json')) return m.reply('File bukan JSON!'); const buffer = await downloadMediaMessage({ key: { remoteJid: m.chat, fromMe: quotedKey.participant === m.sender, id: quotedKey.stanzaId, participant: quotedKey.participant }, message: quotedMessage }, 'buffer', {}, { reuploadRequest: erlic }); const res = await axios.get(rawUrl, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); const sha = res.data.sha; await axios.put(rawUrl, { message: `Update menu.json oleh ${m.sender}`, content: buffer.toString('base64'), sha }, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); m.reply('`menu.json` berhasil diperbarui!'); break; }
+case 'upmenu': { if (!isDev) return m.reply(mess.devs); const filePath = 'database/menu.json'; const rawUrl = `https://api.github.com/repos/joo1alaricc/erlic/contents/${filePath}`; const quotedMessage = m.message?.extendedTextMessage?.contextInfo?.quotedMessage; const quotedKey = m.message?.extendedTextMessage?.contextInfo; if (!quotedMessage?.documentMessage) return m.reply('Reply file *.json* yang mau diupload sebagai `menu.json`!'); const mime = quotedMessage.documentMessage.mimetype || ''; const fileName = quotedMessage.documentMessage.fileName || ''; if (!/json/.test(mime) && !fileName.endsWith('.json')) return m.reply('File bukan JSON!'); const buffer = await downloadMediaMessage({ key: { remoteJid: m.chat, fromMe: quotedKey.participant === m.sender, id: quotedKey.stanzaId, participant: quotedKey.participant }, message: quotedMessage }, 'buffer', {}, { reuploadRequest: erlic }); const res = await axios.get(rawUrl, { headers: { Authorization: `token ${global.gitoken}`, Accept: 'application/vnd.github.v3+json' } }); const sha = res.data.sha; await axios.put(rawUrl, { message: `Update menu.json oleh ${m.sender}`, content: buffer.toString('base64'), sha }, { headers: { Authorization: `token ${global.gitoken}`, Accept: 'application/vnd.github.v3+json' } }); m.reply('`menu.json` berhasil diperbarui!'); break; }
     
-case 'upversion': { if (!isDev) return m.reply(mess.devs); const version = text.trim(); const filePath = 'version.json'; const rawUrl = `https://api.github.com/repos/joo1alaricc/erlic/contents/${filePath}`; if (!version || !/^\d+(\.\d+){1,2}( .+)?$/.test(version)) return m.reply('Format versi tidak valid!\nContoh: *.upversion 1.2.0* atau *.upversion 2.0.0 Beta*'); const res = await axios.get(rawUrl, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); const sha = res.data.sha; const newData = { version }; await axios.put(rawUrl, { message: `Update version ke ${version} oleh ${m.sender}`, content: Buffer.from(JSON.stringify(newData, null, 2)).toString('base64'), sha }, { headers: { Authorization: `token ${global.githubtoken}`, Accept: 'application/vnd.github.v3+json' } }); m.reply(`Versi berhasil diperbarui ke *${version}*!`); break; }
+case 'upversion': { if (!isDev) return m.reply(mess.devs); const version = text.trim(); const filePath = 'version.json'; const rawUrl = `https://api.github.com/repos/joo1alaricc/erlic/contents/${filePath}`; if (!version || !/^\d+(\.\d+){1,2}( .+)?$/.test(version)) return m.reply('Format versi tidak valid!\nContoh: *.upversion 1.2.0* atau *.upversion 2.0.0 Beta*'); const res = await axios.get(rawUrl, { headers: { Authorization: `token ${global.gitoken}`, Accept: 'application/vnd.github.v3+json' } }); const sha = res.data.sha; const newData = { version }; await axios.put(rawUrl, { message: `Update version ke ${version} oleh ${m.sender}`, content: Buffer.from(JSON.stringify(newData, null, 2)).toString('base64'), sha }, { headers: { Authorization: `token ${global.gitoken}`, Accept: 'application/vnd.github.v3+json' } }); m.reply(`Versi berhasil diperbarui ke *${version}*!`); break; }
        
 default:
 if (budy.startsWith('x ')) {
