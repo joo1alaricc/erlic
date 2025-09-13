@@ -15,9 +15,10 @@ const cheerio = require('cheerio')
 const path = require('path')
 const FormData = require('form-data');
 
-module.exports = async (erlic, m) => {
+module.exports = async (erlic, m, func) => {
 const cekError = require('./system/vmHandler'); 
 try {
+const func = require('./system/functions')
 const toMs = require('ms')
 const setting = global.db.setting
 const users = global.db.users[m.sender]
@@ -304,149 +305,6 @@ sendEphemeral: true
 }}
 }
 
-const func = {};
-func.fstatus = (text = '') => ({
-key: {
-fromMe: false,
-participant: '0@s.whatsapp.net',
-...(m.chat ? { remoteJid: 'status@broadcast' } : {})
-},
-message: {
-extendedTextMessage: {
-text: text
-}
-}
-});
-    
-func.fdoc = (text = '') => ({
-  key: {
-    participant: '0@s.whatsapp.net',
-    ...(m.chat ? { remoteJid: 'status@broadcast' } : {})
-  },
-  message: {
-    documentMessage: {
-      title: text,
-      fileName: 'file.pdf',
-      mimetype: 'application/pdf',
-      jpegThumbnail: Buffer.alloc(0)
-    }
-  }
-});
-    
-func.formatNumber = (integer) => {
-    let numb = parseInt(integer)
-    return Number(numb).toLocaleString().replace(/,/g, '.')
-}
-    
-func.texted = (type, text) => {
-    if (type === 'bold') {
-        return '*' + text + '*'
-    } else if (type === 'italic') {
-        return '_' + text + '_'
-    } else if (type === 'monospace') {
-        return '```' + text + '```'
-    } else {
-        return text
-    }
-}
-
-func.timeReverse = function(duration) {
-    let cek = ms(duration - Date.now())
-    return `${cek.days}D ${cek.hours}H ${cek.minutes}M ${cek.seconds}S`
-}
-
-func.delay = (ms) => {
-    return new Promise(res => setTimeout(res, ms))
-}
-
-func.example = (cmd, usage) => `_Example :_  ${pripek}${cmd} ${usage}`;
-    
-func.clockString = (ms) => {
-  if (typeof ms !== 'number') return '--:--:--';
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  return [h, m, s].map(v => v.toString().padStart(2, '0')).join(':');
-};
-
-func.fileSize = (bytes) => {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let i = 0;
-  while (bytes >= 1024 && i < units.length - 1) {
-    bytes /= 1024;
-    i++;
-  }
-  return `${bytes.toFixed(1)} ${units[i]}`;
-};
-    
-func.filename = (ext) => {
-    return `${Math.floor(Math.random() * 10000)}.${ext}`
-}
-
-func.jsonformat = (string) => {
-    return JSON.stringify(string, null, 2)
-}
-
-func.runtime = function(seconds) {
-    seconds = Number(seconds);
-    var d = Math.floor(seconds / (3600 * 24));
-    var h = Math.floor(seconds % (3600 * 24) / 3600);
-    var m = Math.floor(seconds % 3600 / 60);
-    var s = Math.floor(seconds % 60);
-    var dDisplay = d > 0 ? d + (d == 1 ? ' hari, ' : ' hari, ') : '';
-    var hDisplay = h > 0 ? h + (h == 1 ? ' jam, ' : ' jam, ') : '';
-    var mDisplay = m > 0 ? m + (m == 1 ? ' menit, ' : ' menit, ') : '';
-    var sDisplay = s > 0 ? s + (s == 1 ? ' detik' : ' detik') : '';
-    return dDisplay + hDisplay + mDisplay + sDisplay;
-}
-
-func.arrayJoin = (arr) => {
-    var construct = []
-    for (var i = 0; i < arr.length; i++) construct = construct.concat(arr[i])
-    return construct
-}
-    
-func.color = (text, color) => {
-    const chalk = require('chalk')
-    return chalk.keyword(color || 'green').bold(text)}
-
-func.fetchJson = async (url, options = {}) => {
-    try {
-        const res = await axios({
-            method: 'GET',
-            url: url,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36'
-            },
-            ...options
-        })
-        return res.data
-    } catch (err) {
-        return err
-    }
-}
-
-func.msToTime = function(ms) {
-    var milliseconds = parseInt((ms % 1000) / 100),
-        seconds = Math.floor((ms / 1000) % 60),
-        minutes = Math.floor((ms / (1000 * 60)) % 60),
-        hours = Math.floor((ms / (1000 * 60 * 60)) % 24)
-    let h = (hours < 10) ? '0' + hours : hours
-    let m = (minutes < 10) ? '0' + minutes : minutes
-    let s = (seconds < 10) ? '0' + seconds : seconds
-    return h + ':' + m + ':' + s
-}
-
-func.fdoc = {key : {participant : '0@s.whatsapp.net', ...(m.chat ? { remoteJid: `status@broadcast` } : {}) },message: {documentMessage: {title: global.wm, jpegThumbnail: ""}}}
-
-func.isUrl = (url) => {
-    return url.match(new RegExp(/https?:\/\/(www\.)?[-a-zA-Z0-9@:%.+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%+.~#?&/=]*)/, 'gi'))
-}
-
-func.bgcolor = (text, bgcolor) => {
-    const chalk = require('chalk')
-    return !bgcolor ? chalk.green(text) : chalk.bgKeyword(bgcolor)(text)}
-
 const ownerDispley = Array.isArray(global.ownername) ? global.ownername.join(' x ') : global.ownername;
     
 const qtext = { key: { participant: '0@s.whatsapp.net', remoteJid: m.chat ? m.chat : 'status@broadcast'}, message: { locationMessage: { name: `ɴᴀᴍᴇ: ${pushname}
@@ -476,25 +334,6 @@ const apikey = global.apikey;
 const capikey = global.capikey;
 const domain = global.domain;
      
-function applyWatermarkVars(str, name = 'User') {
-  const moment = require('moment-timezone');
-  const hari = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-  const bulan = [
-    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
-  ];
-  const now = new Date();
-  const week = hari[now.getDay()];
-  const date = `${now.getDate()} ${bulan[now.getMonth()]} ${now.getFullYear()}`;
-  const time = moment.tz('Asia/Jakarta').format('HH:mm:ss') + ' WIB';
-  
-  return str
-    ?.replace(/\+week/gi, week)
-    ?.replace(/\+date/gi, date)
-    ?.replace(/\+time/gi, time)
-    ?.replace(/\+name/gi, name);
-}
-    
 const menuPath = './database/menu.json';
 if (!fs.existsSync(menuPath)) fs.writeFileSync(menuPath, '[]');
 
@@ -774,9 +613,7 @@ async function inisialisasi(sender) {
 async function autoBackup(erlic,m){setInterval(async()=>{const fs=require('fs');const{execSync}=require('child_process');const now=new Date();const hourStamp=now.toISOString().slice(0,13);const logPath='./sampah/backup.log';const zipName=`backup_${hourStamp.replace(/:/g,'-')}.zip`;if(global.db.settings.lastBackup===hourStamp)return;global.db.settings.lastBackup=hourStamp;const ls=execSync('ls').toString().split('\n').map(f=>f.trim()).filter(f=>f!==''&&!['node_modules','session','tmp','package-lock.json'].includes(f));try{execSync(`zip-r ${zipName}${ls.join(' ')}`);}catch(e){fs.appendFileSync(logPath,`[${hourStamp}] Gagal zip:${e.message}\n`);return;}const size=fs.statSync(`./${zipName}`).size;const sizeFormatted=size<1024*1024?`${(size/1024).toFixed(2)}KB`:`${(size/1024/1024).toFixed(2)}MB`;const jids=[...new Set((global.owner||[]).map(n=>n.replace(/\D/g,'')+'@s.whatsapp.net'))];for(const jid of jids){try{await erlic.sendMessage(jid,{document:fs.readFileSync(`./${zipName}`),caption:`Berikut adalah file backup kode bot ${global.botname}.\nSize:${sizeFormatted}`,mimetype:'application/zip',fileName:zipName},{quoted:func.fstatus?func.fstatus("Backup Automatically"):undefined});fs.appendFileSync(logPath,`[${hourStamp}] Backup terkirim ke ${jid}(${sizeFormatted})\n`);}catch(e){fs.appendFileSync(logPath,`[${hourStamp}] Gagal kirim ke ${jid}:${e.message}\n`);}}try{if(fs.existsSync(`./${zipName}`)){execSync(`rm-rf ${zipName}`);}}catch(e){fs.appendFileSync(logPath,`[${hourStamp}] Gagal hapus ${zipName}:${e.message}\n`);}},2*60*60*1000);}
 await autoBackup(erlic,m)
    
-function checkCommandTypo(command, budy, m, pripek) { try { const fs = require('fs'), path = require('path'), similarity = require('similarity'); let menuCommands = []; try { const menuData = JSON.parse(fs.readFileSync(path.join(__dirname, './database/menu.json'))); menuCommands = Object.values(menuData).flatMap(obj => Object.values(obj).flat()).map(cmd => cmd.toLowerCase()); } catch (e) { console.warn(e); } let erlicCases = []; try { const erlicPath = path.join(__dirname, 'erlic.js'), content = fs.readFileSync(erlicPath, 'utf-8'), caseRegex = /case\s+['"`](.+?)['"`]\s*:/g; let match; while ((match = caseRegex.exec(content)) !== null) erlicCases.push(match[1].toLowerCase()); } catch (e) { console.warn(e); } const help = [...new Set([...menuCommands, ...erlicCases])]; if (help.includes(command) || /^\$|>|\bx\b/i.test(budy)) return; const ranked = help.map(cmd => ({ cmd, sim: similarity(command, cmd) })).filter(v => v.sim >= 0.5 && v.sim <= 0.9).sort((a, b) => b.sim - a.sim); const typedPrefix = budy.slice(0, 1); if (ranked.length && /^[^a-zA-Z0-9]/.test(budy) && !m.fromMe && !isBot && !ranked.some(item => item.cmd === command.toLowerCase())) m.reply(`Command tidak ditemukan, mungkin maksud kamu:\n\n${ranked.map(v => `➠ *${pripek}${v.cmd}* (${(v.sim * 100).toFixed(1)}%)`).join('\n')}`); } catch (e) { console.error(e); } }
-checkCommandTypo(command, budy, m, pripek);
- 
+func.checkCommandTypo(command, budy, m, pripek);
 await autolevelup(erlic, m, setting, groups)
 await antierror(erlic,m)
 switch(command) {
@@ -1229,6 +1066,58 @@ case 'unregister': case 'unreg': {
   break;
 }
         
+  case 'changename': case 'ubahnama': {
+  if (m.isGroup) return m.reply(mess.private);
+  const user = global.db.users[m.sender];
+  if (!user?.register) return m.reply('You are not registered yet. Please register first.');
+
+  if (!text) return m.reply(func.example(cmd, 'NewName'));
+
+  const prefixes = setting.prefix ? (Array.isArray(setting.prefix) ? setting.prefix : [setting.prefix]) : ['.'];
+  if (prefixes.some(p => text.startsWith(p))) return m.reply('Name cannot start with prefix.');
+  if (/[^a-zA-Z\s]/.test(text)) return m.reply('Name must contain letters only.');
+  if (text.length < 2) return m.reply('Name is too short.');
+  if (text === user.name) return m.reply('Your name already this.');
+
+  user.name = text;
+
+  await erlic.sendMessage(m.chat, {
+    text: `✅ Name successfully changed to: ${user.name}`
+  }, { quoted: m });
+  break;
+}
+        
+ case 'limit': case 'ceklimit': case 'balance': {
+  let userId = m.quoted ? m.quoted.sender : m.sender;
+  if (!global.db.users[userId]) return m.reply('User data not found.');
+
+  let user = global.db.users[userId];
+  let isPrim = user.premium;
+  let status = m.isOwner ? 'Owner' : isPrim ? 'Premium' : 'Free';
+
+  let txt = `乂  *USER STATUS*\n\n`;
+  txt += `- Limit: ${user.limit}/${isPrim ? 99999 : setting.limit}\n`;
+  txt += `- Balance: $${func.rupiah(user.balance)}\n`;
+  txt += `- Status: ${status}`;
+
+  let profilePicture = await erlic.profilePictureUrl(userId, 'image').catch(_ => setting.cover);
+  let thumbnail = await (await fetch(profilePicture)).buffer();
+
+  await erlic.sendMessage(m.chat, {
+    text: txt,
+    contextInfo: {
+      externalAdReply: {
+        title: `User: ${user.name}`,
+        body: ``,
+        sourceUrl: setting.link,
+        mediaType: 1,
+        thumbnail
+      }
+    }
+  }, { quoted: m });
+  break;
+}
+        
 case 'me': {
   const user = global.db.users[m.sender];
   if (!user) return m.reply('User tidak ditemukan di database.');
@@ -1502,6 +1391,21 @@ case 'autorecord': {
         m.reply('Successfully changed autorecord to disable.');
     } else {
         m.reply(`Current status: ${isAutorecord ? 'enable' : 'disable'}\n\nExample: ${pripek + cmd} on/off`);
+    }
+}
+break;
+        
+case 'fakereply': {
+    if (!isCreator) return m.reply(mess.owner);
+    if (args[0] === 'on') {
+        setting.fakereply = true;
+        m.reply('Successfully changed fakereply to enable.');
+    } else if (args[0] === 'off') {
+        setting.fakereply = false;
+        m.reply('Successfully changed fakereply to disable.');
+    } else {
+        let pek = setting.fakereply ? true : false;
+        m.reply(`Current status: ${pek ? 'enable' : 'disable'}\n\nExample: ${pripek + cmd} on/off`);
     }
 }
 break;
@@ -6800,11 +6704,11 @@ case 'pin': {
   break;
 }
         
-case 'quickchat': case 'qc': { let colors = ["#000000", "#ff2414", "#22b4f2", "#eb13f2"]; let profilePicUrl; try { profilePicUrl = await erlic.profilePictureUrl(m.quoted ? m.quoted.sender : m.sender, 'image'); } catch (err) { profilePicUrl = 'https://telegra.ph/file/320b066dc81928b782c7b.png'; } let inputText = text || (m.quoted && m.quoted.text) || ''; if (!inputText) return erlic.sendMessage(m.chat, { text: func.example(cmd, `${global.botname} md`) }, { quoted: m }); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const quoteData = { type: "quote", format: "png", backgroundColor: "#ffffff", width: 512, height: 768, scale: 2, messages: [{ entities: [], avatar: true, from: { id: 1, name: m.pushName, photo: { url: profilePicUrl } }, text: inputText, replyMessage: {} }] }; try { const response = await axios.post('https://bot.lyo.su/quote/generate', quoteData, { headers: { 'Content-Type': 'application/json' } }); const stickerPackName = applyWatermarkVars(setting.packname, m.pushName || 'Sticker by erlic'); const stickerAuthor = applyWatermarkVars(setting.author, m.pushName || ''); const imageBuffer = Buffer.from(response.data.result.image, 'base64'); const sticker = new Sticker(imageBuffer, { pack: stickerPackName, author: stickerAuthor, id: 'https://instagram.com/arxhillie', type: StickerTypes.FULL }); const stickerBuffer = await sticker.toBuffer(); await erlic.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m }); } catch (error) { console.error(error); m.reply(mess.errorstc); } } break;
+case 'quickchat': case 'qc': { let colors = ["#000000", "#ff2414", "#22b4f2", "#eb13f2"]; let profilePicUrl; try { profilePicUrl = await erlic.profilePictureUrl(m.quoted ? m.quoted.sender : m.sender, 'image'); } catch (err) { profilePicUrl = 'https://telegra.ph/file/320b066dc81928b782c7b.png'; } let inputText = text || (m.quoted && m.quoted.text) || ''; if (!inputText) return erlic.sendMessage(m.chat, { text: func.example(cmd, `${global.botname} md`) }, { quoted: m }); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const quoteData = { type: "quote", format: "png", backgroundColor: "#ffffff", width: 512, height: 768, scale: 2, messages: [{ entities: [], avatar: true, from: { id: 1, name: m.pushName, photo: { url: profilePicUrl } }, text: inputText, replyMessage: {} }] }; try { const response = await axios.post('https://bot.lyo.su/quote/generate', quoteData, { headers: { 'Content-Type': 'application/json' } }); const stickerPackName = func.applywm(setting.packname, m.pushName || 'Sticker by erlic'); const stickerAuthor = func.applywm(setting.author, m.pushName || ''); const imageBuffer = Buffer.from(response.data.result.image, 'base64'); const sticker = new Sticker(imageBuffer, { pack: stickerPackName, author: stickerAuthor, id: 'https://instagram.com/arxhillie', type: StickerTypes.FULL }); const stickerBuffer = await sticker.toBuffer(); await erlic.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m }); } catch (error) { console.error(error); m.reply(mess.errorstc); } } break;
         
-case 'brat': { let aA=text||(m.quoted&&m.quoted.text)||''; if(!aA) return erlic.sendMessage(m.chat,{text:func.example(cmd,`${global.botname} hai`)},{quoted:m}); if(aA.length>250) return m.reply('Maksimal 250 karakter.'); await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}}); let Ab=applyWatermarkVars(setting.packname,m.pushName||'Sticker by erlic'); let bB=applyWatermarkVars(setting.author,m.pushName||''); let Aa=await axios.get('https://aqul-brat.hf.space/?text='+encodeURIComponent(aA),{responseType:'arraybuffer'}); let aB=new Sticker(Aa.data,{pack:Ab,author:bB,type:StickerTypes.FULL,id:'https://instagram.com/brzee_.sky'}); let Ba=await aB.toBuffer(); await erlic.sendMessage(m.chat,{sticker:Ba},{quoted:m}); } break;
+case 'brat': { let aA=text||(m.quoted&&m.quoted.text)||''; if(!aA) return erlic.sendMessage(m.chat,{text:func.example(cmd,`${global.botname} hai`)},{quoted:m}); if(aA.length>250) return m.reply('Maksimal 250 karakter.'); await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}}); let Ab=func.applywm(setting.packname,m.pushName||'Sticker by erlic'); let bB=func.applywm(setting.author,m.pushName||''); let Aa=await axios.get('https://aqul-brat.hf.space/?text='+encodeURIComponent(aA),{responseType:'arraybuffer'}); let aB=new Sticker(Aa.data,{pack:Ab,author:bB,type:StickerTypes.FULL,id:'https://instagram.com/brzee_.sky'}); let Ba=await aB.toBuffer(); await erlic.sendMessage(m.chat,{sticker:Ba},{quoted:m}); } break;
         
-case 'bratgif': case 'bratvid': { const path = require('path'); let inputText = text || (m.quoted && m.quoted.text) || ''; if (!inputText) return erlic.sendMessage(m.chat, { text: func.example(cmd, `${global.botname} md`)}, { quoted: m }); if (inputText.trim().split(/\s+/).length < 2) return m.reply('Minimal 2 kata.'); if (inputText.length > 250) return m.reply('Maksimal 250 karakter.'); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const tmpDir = path.resolve("./tmp"); if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir); const videoFilePath = path.join(tmpDir, "bratgif.mp4"); const webpFilePath = path.join(tmpDir, "bratgif.webp"); let stickerPackName = applyWatermarkVars(setting.packname, m.pushName || 'Sticker by erlic'); let stickerAuthor = applyWatermarkVars(setting.author, m.pushName || ''); try { const apiUrl = `https://api.nekorinn.my.id/maker/bratvid?text=${encodeURIComponent(inputText)}`; const { data: videoBuffer } = await axios.get(apiUrl, { responseType: "arraybuffer" }); fs.writeFileSync(videoFilePath, videoBuffer); execSync(`ffmpeg -y -i "${videoFilePath}" -vcodec libwebp -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15" -loop 0 -ss 0 -t 5 -preset default -an -vsync 0 "${webpFilePath}"`); if (!fs.existsSync(webpFilePath)) return m.reply(mess.errorstc); const webpBuffer = fs.readFileSync(webpFilePath); const sticker = new Sticker(webpBuffer, { pack: stickerPackName, author: stickerAuthor, type: StickerTypes.FULL, id: 'https://instagram.com/brzee_.sky', quality: 100 }); const stickerBuffer = await sticker.toBuffer(); await erlic.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m }); fs.unlinkSync(videoFilePath); fs.unlinkSync(webpFilePath); } catch (error) { console.error(error); await handleError(error, m, erlic, 'stc'); } } break;
+case 'bratgif': case 'bratvid': { const path = require('path'); let inputText = text || (m.quoted && m.quoted.text) || ''; if (!inputText) return erlic.sendMessage(m.chat, { text: func.example(cmd, `${global.botname} md`)}, { quoted: m }); if (inputText.trim().split(/\s+/).length < 2) return m.reply('Minimal 2 kata.'); if (inputText.length > 250) return m.reply('Maksimal 250 karakter.'); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const tmpDir = path.resolve("./tmp"); if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir); const videoFilePath = path.join(tmpDir, "bratgif.mp4"); const webpFilePath = path.join(tmpDir, "bratgif.webp"); let stickerPackName = func.applywm(setting.packname, m.pushName || 'Sticker by erlic'); let stickerAuthor = func.applywm(setting.author, m.pushName || ''); try { const apiUrl = `https://api.nekorinn.my.id/maker/bratvid?text=${encodeURIComponent(inputText)}`; const { data: videoBuffer } = await axios.get(apiUrl, { responseType: "arraybuffer" }); fs.writeFileSync(videoFilePath, videoBuffer); execSync(`ffmpeg -y -i "${videoFilePath}" -vcodec libwebp -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15" -loop 0 -ss 0 -t 5 -preset default -an -vsync 0 "${webpFilePath}"`); if (!fs.existsSync(webpFilePath)) return m.reply(mess.errorstc); const webpBuffer = fs.readFileSync(webpFilePath); const sticker = new Sticker(webpBuffer, { pack: stickerPackName, author: stickerAuthor, type: StickerTypes.FULL, id: 'https://instagram.com/brzee_.sky', quality: 100 }); const stickerBuffer = await sticker.toBuffer(); await erlic.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m }); fs.unlinkSync(videoFilePath); fs.unlinkSync(webpFilePath); } catch (error) { console.error(error); await handleError(error, m, erlic, 'stc'); } } break;
         
 case 'stag': {
 let raw = (args[0] || '').replace(/[^0-9]/g, '')
@@ -6819,8 +6723,8 @@ if (!isCreator && isTargetOwner) return m.reply('Tidak bisa mengambil stiker dar
 await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
 let pporang = await erlic.profilePictureUrl(targetJid, 'image').catch(_ => '')
 if (!pporang) return m.reply('Gagal mengambil foto profil.')
-const packname = applyWatermarkVars(setting.packname, m.pushName || 'Sticker by erlic')
-const author = applyWatermarkVars(setting.author, m.pushName || '')
+const packname = func.applywm(setting.packname, m.pushName || 'Sticker by erlic')
+const author = func.applywm(setting.author, m.pushName || '')
 const { Sticker, StickerTypes } = require('wa-sticker-formatter')
 const stiker = new Sticker(pporang, {
 pack: packname,
@@ -6842,8 +6746,8 @@ case 'stiker': case 'sticker': case 's': {
  const dimas = await quoted.download();
  if (!dimas) return m.reply(mess.error);
  try {
- const packname = applyWatermarkVars(setting.packname, m.pushName || 'Sticker by erlic');
-const author = applyWatermarkVars(setting.author, m.pushName || '');
+ const packname = func.applywm(setting.packname, m.pushName || 'Sticker by erlic');
+const author = func.applywm(setting.author, m.pushName || '');
  const nathan = new Sticker(dimas, {
  pack: packname,
  author: author,
@@ -6870,8 +6774,8 @@ const dimas = await quoted.download()
 if (!dimas) return m.reply(mess.error)
 try {
 const sharp = require('sharp')
-const packname = applyWatermarkVars(setting.packname, m.pushName || 'Sticker by erlic')
-const author = applyWatermarkVars(setting.author, m.pushName || '')
+const packname = func.applywm(setting.packname, m.pushName || 'Sticker by erlic')
+const author = func.applywm(setting.author, m.pushName || '')
 let squareBuffer = await sharp(dimas).resize(512, 512, { fit: 'cover' }).toBuffer()
 const { Sticker, StickerTypes } = require('wa-sticker-formatter')
 const nathan = new Sticker(squareBuffer, {
