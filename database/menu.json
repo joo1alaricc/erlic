@@ -287,7 +287,8 @@
       "addowner",
       "delowner",
       "backupsc",
-      "autolevelup"
+      "autolevelup",
+      "fakereply"
     ]
   },
   {
@@ -467,7 +468,10 @@
       "me",
       "profile",
       "unregister",
-      "register"
+      "register",
+      "changename",
+      "limit",
+      "balance"
     ]
   },
   {
