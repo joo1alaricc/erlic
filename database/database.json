@@ -419,6 +419,28 @@
       "exp": 0,
       "level": 0,
       "role": "Bronze V"
+    },
+    "6289602860309@s.whatsapp.net": {
+      "jid": "6289602860309@s.whatsapp.net",
+      "register": false,
+      "name": "Havie",
+      "gender": "",
+      "age": 0,
+      "date": "13 September 2025",
+      "limit": 15,
+      "balance": 10000,
+      "premium": false,
+      "banned": false,
+      "warning": 0,
+      "expired": {
+        "user": 1758400775456,
+        "premium": 0,
+        "banned": 0
+      },
+      "lastunreg": 0,
+      "exp": 0,
+      "level": 0,
+      "role": "Bronze V"
     }
   },
   "groups": {
@@ -460,6 +482,24 @@
     },
     "120363403902065474@g.us": {
       "jid": "120363403902065474@g.us",
+      "name": "-",
+      "blacklist": [],
+      "member": []
+    },
+    "120363421131441163@g.us": {
+      "jid": "120363421131441163@g.us",
+      "name": "-",
+      "blacklist": [],
+      "member": []
+    },
+    "120363420545044310@g.us": {
+      "jid": "120363420545044310@g.us",
+      "name": "-",
+      "blacklist": [],
+      "member": []
+    },
+    "120363313295287404@g.us": {
+      "jid": "120363313295287404@g.us",
       "name": "-",
       "blacklist": [],
       "member": []
