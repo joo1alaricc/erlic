@@ -24,6 +24,7 @@
     "@hapi/boom": "^10.0.0",
     "@whiskeysockets/baileys": "npm:@whiskeysockets/baileys@6.7.17",
     "acrcloud": "^1.4.0",
+    "adm-zip": "^0.5.16",
     "archiver": "^6.0.2",
     "awesome-phonenumber": "^2.64.0",
     "axios": "^1.10.0",
