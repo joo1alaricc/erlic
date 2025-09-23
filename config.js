@@ -8,7 +8,7 @@
 /* setting informasi bot */
 // ganti nomor bot lu
 global.config = {
-    botnumber: '6282245682288',
+    botnumber: '6283878301449',
     pairing: true,
     session: 'session',
     online: true,
@@ -68,9 +68,9 @@ global.gconly = true
 
 /* setting payment */
 // url qris lu
-global.qris = 'https://files.catbox.moe/kuqiup.jpg' 
+global.qris = 'https://files.catbox.moe/emehtl.jpeg' 
 // sesuai nama qris di global.qris
-global.payment = 'gopay'
+global.payment = ''
 // sesuai nomor e-money lu
 global.ovo = '' 
 global.dana = ''
@@ -82,11 +82,11 @@ global.pulsa2 = ''
 
 /* setting cpanel */
 // domain panel lu
-global.domain = 'https://alwaysdimzzy.harzhosting.web.id' 
+global.domain = 'https://panel-denzbackera.speedhost.biz.id' 
 // token ptla lu
-global.apikey = 'ptla_8AY1lbEYJbQeagONwNSxl1hIUo4xU6KtyOcoHkgVAfQ'
+global.apikey = 'ptla_0Ps7A50sOlwIYYxblrLpLVhC2WThVHQNXzu1S4r0mWK'
 // token ptlc lu
-global.capikey = 'ptlc_g1WMP2dLDN7KrqYQBAqKX4PnJmHTQsUYtTWWx4Lnqyf'
+global.capikey = 'ptlc_ciP6Hnwi8pRqlGYlr1187pgCskFPWKlm3EqpFWHI04C'
 global.egg = '15' /* Recommended */
 global.loc = '1' /* Recommended */
 
@@ -98,7 +98,7 @@ limit: 'Anda mencapai limit dan akan disetel ulang pada pukul 00.00\n\nUntuk men
 premium: 'This feature only for premium user.',
 jadibot: 'This feature only for jadibot user.',
 owner: 'This feature is only for owners.',
-gconly: 'Menggunakan bot di obrolan pribadi hanya untuk pengguna premium, tingkatkan ke paket premium hanya Rp10.000 selama 1 bulan.\n\nhttps://chat.whatsapp.com/FomSh8g1Te1IGfiuDDcW5u\nBergabung kedalam grup kami agar dapat menggunakan bot di obrolan pribadi.',
+gconly: 'Menggunakan bot di obrolan pribadi hanya untuk pengguna premium, tingkatkan ke paket premium hanya Rp10.000 selama 1 bulan.\n\nhttps://chat.whatsapp.com/GcJpxrGy2IYA1E7sYgpMz9\nBergabung kedalam grup kami agar dapat menggunakan bot di obrolan pribadi.',
 blockcmd: 'This feature is being blocked by system because an error occurred.',
 group: 'This feature will only work in groups.',
 private: 'Use this feature in private chat.',
