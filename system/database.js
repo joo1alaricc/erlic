@@ -17,7 +17,7 @@ const loaded = JSON.parse(data);
 if (loaded.users) global.db.users = loaded.users;
 if (loaded.groups) global.db.groups = loaded.groups;
 if (loaded.setting) global.db.setting = loaded.setting;
-console.log('Successfully reload database.');
+// console.log('Successfully reload database.');
 }
 } catch (err) {}
 }
@@ -106,14 +106,15 @@ if (!('autorecord' in settings)) settings.autorecord = false;
 if (!('autotyping' in settings)) settings.autotyping = false;
 if (!('gconly' in settings)) settings.gconly = false 
 if (!('online' in settings)) settings.online = false
+if (!('public' in settings)) settings.public = true
 if (!('menu' in settings)) settings.menu = 1
 if (!('menus' in settings)) settings.menus = 1
 if (!('video' in settings)) settings.video = 'https://files.catbox.moe/5duc9k.mp4'
 if (!('delayJpm' in settings)) settings.delayJpm = 5
 if (!('cooldown' in settings)) settings.cooldown = 2
-if (!('verify' in settings)) settings.verify = true
+if (!('limit' in settings)) settings.limit = { premium: 99999, free: 50}
+if (!('verify' in settings)) settings.verify = false
 if (!('style' in settings)) settings.style = 38
-if (!isNumber(settings.limit)) settings.limit = 15;
 if (!isNumber(settings.hargalimit)) settings.hargalimit = 1000;
 if (!('hargasc' in settings)) settings.hargasc = 35000;
 if (!('lastBackup' in settings)) settings.lastBackup = 0;
@@ -127,7 +128,6 @@ author: '',
 cover: global.thumb,
 link: global.link,
 style: 38,
-limit: 15,
 hargasc: 35000,
 lastBackup: 0,
 antispam: false,
@@ -137,11 +137,13 @@ autorecord: false,
 autotyping: false,
 gconly: false,
 online: false,
-verify: true,
+verify: false,
+public: true,
 delayJpm: 5,
 cooldown: 2,
 menu: 1,
 menus: 1,
+limit: { premium: 99999, free: 50},
 video: global.video,
 hargalimit: 1000,
 blockcmd: [],
