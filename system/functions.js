@@ -50,18 +50,20 @@ func.applywm = (str, name = 'User') => {
 
 func.checkCommandTypo = (command, budy, m, pripek) => {
     try {
+        // 1. Ambil command dari menu.json
         let menuCommands = [];
         try {
-            const menuData = require ('../database/menu.json');
+            const menuData = require('../database/menu.json');
             menuCommands = Object.values(menuData).flatMap(obj => Object.values(obj).flat()).map(cmd => cmd.toLowerCase());
         } catch (e) {
             console.warn(e);
         }
 
+        // 2. Ambil case dari erlic.js
         let erlicCases = [];
         try {
             const erlicPath = path.join(__dirname, '../erlic.js');
-const content = fs.readFileSync(erlicPath, 'utf-8');
+            const content = fs.readFileSync(erlicPath, 'utf-8');
             const caseRegex = /case\s+['"`](.+?)['"`]\s*:/g;
             let match;
             while ((match = caseRegex.exec(content)) !== null) erlicCases.push(match[1].toLowerCase());
@@ -69,8 +71,46 @@ const content = fs.readFileSync(erlicPath, 'utf-8');
             console.warn(e);
         }
 
-        const help = [...new Set([...menuCommands, ...erlicCases])];
-        if (help.includes(command) || /^\$|>|\bx\b/i.test(budy)) return;
+        // 3. Ambil command dari semua plugin
+        let pluginCommands = [];
+        const pluginDir = path.resolve(__dirname, '../plugins');
+        const walk = dir => {
+            let results = [];
+            for (const file of fs.readdirSync(dir)) {
+                const fullPath = path.join(dir, file);
+                if (fs.statSync(fullPath).isDirectory()) {
+                    results = results.concat(walk(fullPath));
+                } else if (file.endsWith('.js')) {
+                    results.push(fullPath);
+                }
+            }
+            return results;
+        };
+        const files = walk(pluginDir);
+        for (const file of files) {
+            try {
+                const plug = require(file);
+const data = plug.run || plug;
+if (!data || !data.usage || !data.hidden || !data.category) continue;
+
+// gabungkan usage dan hidden
+const commands = [...(data.usage || []), ...(data.hidden || [])];
+
+for (const cmd of commands) {
+    if (!pluginCommands.includes(cmd.toLowerCase())) {
+        pluginCommands.push(cmd.toLowerCase());
+    }
+                }
+            } catch (e) {
+                console.warn(`Gagal load plugin ${file}:`, e.message);
+            }
+        }
+
+        // 4. Gabungkan semua sumber
+        const help = [...new Set([...menuCommands, ...erlicCases, ...pluginCommands])];
+
+        // 5. Cek command typo
+        if (help.includes(command.toLowerCase()) || /^\$|>|\bx\b/i.test(budy)) return;
 
         const ranked = help
             .map(cmd => ({ cmd, sim: similarity(command, cmd) }))
@@ -83,7 +123,7 @@ const content = fs.readFileSync(erlicPath, 'utf-8');
     } catch (e) {
         console.error(e);
     }
-}
+};
 
 func.readmore = String.fromCharCode(8206).repeat(4001)
 
