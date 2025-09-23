@@ -67,35 +67,6 @@
     ]
   },
   {
-    "main": [
-      "server",
-      "script",
-      "ping",
-      "owner",
-      "listbanned",
-      "listpremium",
-      "kodebahasa",
-      "kalender",
-      "totalfitur",
-      "listfont",
-      "donate",
-      "status",
-      "os",
-      "memory",
-      "tanggal",
-      "ceksession",
-      "systeminfo",
-      "lastsync",
-      "runtime",
-      "cekpanel",
-      "buypremium",
-      "sewabot",
-      "dashboard",
-      "buypanel",
-      "menu"
-    ]
-  },
-  {
     "tools": [
       "readmore",
       "calculator",
@@ -415,9 +386,7 @@
       "niatsholat",
       "doaharian",
       "murottal",
-      "hadits",
-      "kisahnabi",
-      "jadwalsholat"
+      "hadits"
     ]
   },
   {
@@ -475,17 +444,31 @@
     ]
   },
   {
-    "rpg": [
-      "adventure",
-      "berburu",
-      "kandang",
-      "create",
-      "berkebun",
-      "buybibit",
-      "sell",
-      "gudang",
-      "buy",
-      "inventory"
+    "special": [
+      "buypanel",
+      "buypremium",
+      "cekpanel",
+      "ceksession",
+      "dashboard",
+      "donate",
+      "kalender",
+      "kodebahasa",
+      "lastsync",
+      "listbanned",
+      "listfont",
+      "listpremium",
+      "memory",
+      "menu",
+      "os",
+      "owner",
+      "ping",
+      "runtime",
+      "server",
+      "sewabot",
+      "status",
+      "systeminfo",
+      "tanggal",
+      "totalfitur"
     ]
   }
 ]
