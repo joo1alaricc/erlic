@@ -9,7 +9,7 @@ const crypto = require('crypto')
 const fetch = require('node-fetch')
 const ms = require('parse-ms')
 const { performance } = require('perf_hooks')
-const { default: makeWASocket, proto, generateWAMessageFromContent, prepareWAMessageMedia } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, proto, generateWAMessageFromContent, prepareWAMessageMedia, getSenderLid, toJid } = require('@whiskeysockets/baileys');
 const { Sticker, createSticker, StickerTypes } = require('wa-sticker-formatter')
 const cheerio = require('cheerio')
 const path = require('path')
@@ -18,6 +18,7 @@ const FormData = require('form-data');
 module.exports = async (erlic, m, func) => {
 const cekError = require('./system/vmHandler'); 
 try {
+const handleMessage = require('./system/handler')
 const func = require('./system/functions')
 const toMs = require('ms')
 const setting = global.db.setting
@@ -99,10 +100,18 @@ const getGroupMetadata = async (id) => {
     return {};
   }
 };
-const groupMetadata=m.isGroup?await getGroupMetadata(m.chat):{};
-const isBotAdmin = m.isGroup && Array.isArray(groupMetadata.participants) ? groupMetadata.participants.some(p => p.id === botNumber && p.admin !== null) : false;
-const isAdmin = m.isGroup && Array.isArray(groupMetadata.participants) ? groupMetadata.participants.some(p => p.id === m.sender && p.admin !== null) : false;
-const isAdmins = m.isGroup && Array.isArray(groupMetadata.participants) ? groupMetadata.participants.some(p => p.id === m.sender && p.admin !== null) : false;
+    const isGroup = from.endsWith("@g.us");
+        const isPrivate = from.endsWith("@s.whatsapp.net");
+const groupMetadata = isGroup ? await erlic.groupMetadata(m.chat).catch((e) => {}) : "";
+        const groupOwner = isGroup ? groupMetadata.owner : "";
+        const groupName = isGroup ? groupMetadata.subject : "";
+        const participants = isGroup ? await groupMetadata.participants : "";
+        const groupAdmins = isGroup ? await participants.filter((v) => v.admin !== null).map((v) => v.id) : "";
+        const groupMembers = isGroup ? groupMetadata.participants : "";
+        const isGroupAdmins = isGroup ? groupAdmins.includes(m.sender) : false;
+        const isBotGroupAdmins = isGroup ? groupAdmins.includes(botNumber) : false;
+        const isBotAdmin = isGroup ? groupAdmins.includes(botNumber) : false;
+        const isAdmin = isGroup ? groupAdmins.includes(m.sender) : false;
 const isPrem = (id) => {
   const user = global.db.users[id];
   if (!user || !user.premium) return false;
@@ -435,34 +444,41 @@ async function checkBlacklist(m, sender, isGroup) {
     return true;
 }
 
-function isBanned(id) {
-    const users = global.db.users[id];
-    if (!users) return false;
-    if (!users.banned) return false;
-    if (users.expired.banned === -1) return true;
-    return Date.now() < users.expired.banned;
+async function isBanned(id) {
+    const user = global.db.users[id];
+    if (!user) return false;
+    if (!user.banned) return false;
+    if (user.expired.banned && user.expired.banned !== -1 && Date.now() >= user.expired.banned) {
+        user.banned = false;
+        user.expired.banned = 0;
+        await erlic.sendMessage(id, { 
+            text: "Banned berakhir, Jangan melanggar rules agar tidak dibanned lagi." 
+        }, { quoted: func.fstatus("System Notification")});
+        return false; 
+    }
+    return user.banned;
 }
-
-if (!isCreator && isBanned(m.sender) && !['owner', 'me'].includes(command) && isCmd) {
-    const users = global.db.users[m.sender];
+ for (let id of Object.keys(global.db.users)) {
+    await isBanned(id);
+}
+    
+if (!isCreator && await isBanned(m.sender) && !['owner', 'me'].includes(command) && isCmd) {
+    const user = global.db.users[m.sender];
     let untilText = 'UNKNOWN';
 
-    if (users && users.banned) {
-        if (users.expired.banned === -1) {
-            untilText = 'PERMANENT';
-        } else {
-            let diff = users.expired.banned - Date.now();
-            if (diff < 0) diff = 0;
-            const totalSeconds = Math.floor(diff / 1000);
-            const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
-            const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
-            const seconds = String(totalSeconds % 60).padStart(2, '0');
-            untilText = `${hours}:${minutes}:${seconds}`;
-        }
+    if (user.expired.banned === -1) untilText = 'PERMANENT';
+    else {
+        let diff = user.expired.banned - Date.now();
+        if (diff < 0) diff = 0;
+        const totalSeconds = Math.floor(diff / 1000);
+        const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+        const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+        const seconds = String(totalSeconds % 60).padStart(2, '0');
+        untilText = `${hours}:${minutes}:${seconds}`;
     }
 
-    return erlic.sendMessage(m.chat, {
-        text: `Maaf kamu sedang dibanned.\nBerakhir: *${untilText}*`
+    return erlic.sendMessage(m.chat, { 
+        text: `Maaf kamu sedang dibanned.\nBerakhir: *${untilText}*` 
     }, { quoted: m });
 }
 
@@ -566,14 +582,12 @@ if (setting.gconly) {
 const metadata = await getGroupMetadata(global.idgc)
 if (
 !isCreator &&
-!isPrem &&
-!m.isPrem &&
+!isPrem(m.sender) &&
 command &&
 !m.isGroup &&
 !m.fromMe &&
 !isBot &&
-!['owner','sticker','s','stiker','menu'].includes(command) &&
-!metadata.participants?.some(v => v.id === m.sender)
+!['owner','sticker','s','stiker','menu','register','unregister','daftar'].includes(command) && !metadata.participants?.some(v => v.id === m.sender)
 )
 return erlic.sendMessage(m.chat, {
 text: mess.gconly,
@@ -591,6 +605,10 @@ showAdAttribution: false
 }
 }, { quoted: func.fstatus('System Notification') })
 }
+    
+    const commandTe = body.startsWith(prefix) ? body.slice(prefix.length).split(' ')[0].toLowerCase() : null;
+    
+if (setting.verify && !global.db.users[m.sender]?.register && !['register','unregister','owner','rules','donate','buyprem','sewabot','harga','suit','tictactoe','werewolf','sticker','menu','menfes','script','jadibot','listbot','stopbot','delsesibot'].includes(commandTe) && !isCreator) return erlic.sendMessage(m.chat, { text: `Nomor kamu belum terverifikasi, kirim *${setting.prefix}register*${m.isGroup ? ' di private chat' : ''} untuk verifikasi.` }, { quoted: m });
     
 async function inisialisasi(sender) {
     if (!global.db.users) global.db.users = {};
@@ -613,6 +631,8 @@ async function inisialisasi(sender) {
 async function autoBackup(erlic,m){setInterval(async()=>{const fs=require('fs');const{execSync}=require('child_process');const now=new Date();const hourStamp=now.toISOString().slice(0,13);const logPath='./sampah/backup.log';const zipName=`backup_${hourStamp.replace(/:/g,'-')}.zip`;if(global.db.settings.lastBackup===hourStamp)return;global.db.settings.lastBackup=hourStamp;const ls=execSync('ls').toString().split('\n').map(f=>f.trim()).filter(f=>f!==''&&!['node_modules','session','tmp','package-lock.json'].includes(f));try{execSync(`zip-r ${zipName}${ls.join(' ')}`);}catch(e){fs.appendFileSync(logPath,`[${hourStamp}] Gagal zip:${e.message}\n`);return;}const size=fs.statSync(`./${zipName}`).size;const sizeFormatted=size<1024*1024?`${(size/1024).toFixed(2)}KB`:`${(size/1024/1024).toFixed(2)}MB`;const jids=[...new Set((global.owner||[]).map(n=>n.replace(/\D/g,'')+'@s.whatsapp.net'))];for(const jid of jids){try{await erlic.sendMessage(jid,{document:fs.readFileSync(`./${zipName}`),caption:`Berikut adalah file backup kode bot ${global.botname}.\nSize:${sizeFormatted}`,mimetype:'application/zip',fileName:zipName},{quoted:func.fstatus?func.fstatus("Backup Automatically"):undefined});fs.appendFileSync(logPath,`[${hourStamp}] Backup terkirim ke ${jid}(${sizeFormatted})\n`);}catch(e){fs.appendFileSync(logPath,`[${hourStamp}] Gagal kirim ke ${jid}:${e.message}\n`);}}try{if(fs.existsSync(`./${zipName}`)){execSync(`rm-rf ${zipName}`);}}catch(e){fs.appendFileSync(logPath,`[${hourStamp}] Gagal hapus ${zipName}:${e.message}\n`);}},2*60*60*1000);}
 await autoBackup(erlic,m)
    
+const commandText = m.text?.trim()?.split(' ')[0]?.replace(/^!/, '').toLowerCase();
+await handleMessage(erlic, m);
 func.checkCommandTypo(command, budy, m, pripek);
 await autolevelup(erlic, m, setting, groups)
 await antierror(erlic,m)
@@ -626,15 +646,45 @@ case `${global.botname}`: case "menu": {
     let ppuser = setting.cover;
     const fs = require('fs');
     const { styles } = require('./system/font.js');
-    const path = './database/menu.json';
-    const menu = JSON.parse(fs.readFileSync(path));
-    const formatCategory = (text) => text.toUpperCase().split('').join(' ');
-    const formatCommands = (cmds) => cmds.sort().map(cmd => `◦ ${pripek}${cmd}`).join('\n');
-    const categoriesMap = {};
-    menu.forEach(obj => {
-        const [category, commands] = Object.entries(obj)[0];
-        categoriesMap[category.toLowerCase()] = commands;
-    });
+const path = require('path');
+const menu = JSON.parse(fs.readFileSync('./database/menu.json'));
+const formatCategory = (text) => text.toUpperCase().split('').join(' ');
+const formatCommands = (cmds) => cmds.sort().map(cmd => `◦ ${pripek}${cmd}`).join('\n');
+const categoriesMap = {};
+menu.forEach(obj => {
+  const [category, commands] = Object.entries(obj)[0];
+  categoriesMap[category.toLowerCase()] = commands;
+});
+function walk(dir) {
+  let results = [];
+  const list = fs.readdirSync(dir);
+  list.forEach(file => {
+    const filePath = path.join(dir, file);
+    const stat = fs.statSync(filePath);
+    if (stat && stat.isDirectory()) {
+      results = results.concat(walk(filePath));
+    } else if (filePath.endsWith('.js')) {
+      results.push(filePath);
+    }
+  });
+  return results;
+}
+const pluginDir = path.resolve(__dirname, './plugins');
+const files = walk(pluginDir);
+for (let file of files) {
+    if (file.includes(`${path.sep}event${path.sep}`)) continue;
+    const plug = require(file);
+    const data = plug.run || plug;
+    if (!data || !data.usage || !data.category) continue;
+    let { usage, category } = data;
+    category = category.toLowerCase();
+    if (!categoriesMap[category]) categoriesMap[category] = [];
+    for (let cmd of usage) {
+        if (!categoriesMap[category].includes(cmd)) {
+            categoriesMap[category].push(cmd);
+        }
+    }
+}
     const selectedCategory = args.join(' ')?.toLowerCase();
     const dbPath = "./database/database.json";
     let dbSizeInBytes = 0;
@@ -771,6 +821,19 @@ tinggal sapa owner — dia yang pegang pengaturannya.
     const cmds = categoriesMap[selectedCategory];
     const formatted = formatCommands(cmds);
     replyText = `乂  *${formatCategory(selectedCategory)}*\n\n${formatted}`;
+} else if (categoriesMap[selectedCategory]) {
+    const cmds = categoriesMap[selectedCategory];
+    const formatted = formatCommands(cmds);
+
+    const uses = cmds.map(cmd => {
+        try {
+            return require(`../plugins/${cmd}.js`).run?.use || ''
+        } catch {
+            return ''
+        }
+    }).filter(Boolean).join(', ')
+
+    replyText = `乂  *${formatCategory(selectedCategory)}*\n\n${formatted} *${uses}*`;
 } else {
     await m.reply(`Kategori *${selectedCategory}* tidak ditemukan.`);
     await erlic.sendMessage(m.chat, { react: { text: '❌', key: m.key }})
@@ -1484,9 +1547,6 @@ break;
     case'proses':{if(!isCreator)return m.reply(mess.owner);let raw=text||'';if(!raw&&!m.quoted)return m.reply(func.example(cmd, 'Pulsa,5000,628xxxx'));let[product,nominal,target]=raw.split(',').map(v=>v?.trim()),parsed=parseInt((nominal||'').replace(/[^0-9]/g,''),10);if(!product||isNaN(parsed))return m.reply(func.example(cmd, 'Pulsa,5000,628xxxx'));if(!target&&m.quoted)target=m.quoted.sender?.split('@')[0];if(!target)return m.reply('Target tidak ditemukan.');if(target.startsWith('0'))target='62'+target.slice(1);else if(target.startsWith('+'))target=target.replace('+','');let now=new Date(),tanggal=now.toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'}),waktu=now.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'}),teks=`乂 *TRANSACTION ON PROCESS*\n\n- *Product* : _${product}_\n- *Nominal* : _Rp${formatMoney(parsed)}_\n- *Date* : _${tanggal}_\n- *Time* : _${waktu}_ WIB\n- *Status* : On Process 🔄\n\n*PLEASE WAIT PATIENTLY*`;erlic.sendMessage(`${target}@s.whatsapp.net`,{text:teks},{quoted:func.fstatus('System Notification')});erlic.sendMessage(m.chat,{text:'⏳ Status proses telah dikirim!'},{quoted:m})}
 break;
 
-    case'done':{if(!isCreator)return m.reply(mess.owner);let raw=text||'';if(!raw&&!m.quoted)return m.reply(func.example(cmd, 'Pulsa,5000,628xxxx'));let[product,nominal,target]=raw.split(',').map(v=>v?.trim()),parsed=parseInt((nominal||'').replace(/[^0-9]/g,''),10);if(!product||isNaN(parsed))return m.reply(func.example(cmd, 'Pulsa,5000,628xxxx'));if(!target&&m.quoted)target=m.quoted.sender?.split('@')[0];if(!target)return m.reply('Target tidak ditemukan.');if(target.startsWith('0'))target='62'+target.slice(1);else if(target.startsWith('+'))target=target.replace('+','');let now=new Date(),tanggal=now.toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'}),waktu=now.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',second:'2-digit'}),teks=`乂 *TRANSACTION SUCCESSFULLY*\n\n- *Product* : _${product}_\n- *Nominal* : _Rp${formatMoney(parsed)}_\n- *Date* : _${tanggal}_\n- *Time* : _${waktu}_ WIB\n- *Status* : Success ✅\n\n*THANK YOU FOR ORDERING*`;erlic.sendMessage(`${target}@s.whatsapp.net`,{text:teks},{quoted:func.fstatus('System Notification')});erlic.sendMessage(m.chat,{text:'✅ Transaksi berhasil dikirim!'},{quoted:m})}
-break;
-        
 case 'public':
 case 'self': {
   if (!isCreator) return m.reply(mess.owner)
@@ -1494,14 +1554,16 @@ case 'self': {
   const isPublic = command === 'public'
   const mode = isPublic ? 'Public' : 'Self'
 
-  if (erlic.public === isPublic) {
+  if (setting.public === isPublic) {
     return m.reply(`Already in mode *${mode}*.`)
   }
 
-  erlic.public = isPublic
+  setting.public = isPublic
   m.reply(`Berhasil mengubah bot ke mode *${mode}*!`)
 }
 break
+        
+
         
 case 'demote':
 case 'dm': {
@@ -3557,48 +3619,7 @@ break;
   }
 }
 break;
-        
-case 'kisahnabi': {
-if (!text) return m.reply(func.example(cmd, 'Adam AS'))
-try {
-await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
-const { default: axios } = require('axios')
-const res = await axios.get(`https://api.fasturl.link/religious/prophetstory?name=${encodeURIComponent(text)}`)
-const data = res.data
-if (data.status !== 200 || !data.result?.length) return m.reply('Kisah tidak ditemukan!')
-const k = data.result[0]
-let caption = `乂 KISAH NABI\n\n`
-caption += `- Nama: ${k.name}\n`
-caption += `- Tempat: ${k.place}\n`
-caption += `- Tahun lahir: ${k.bornYear} SM\n`
-caption += `- Usia: ${k.age} tahun\n\n`
-caption += `Kisah singkat:\n${k.description}`
-await erlic.sendMessage(m.chat, { image: { url: k.imageUrl }, caption: caption.trim() }, { quoted: m })
-} catch (e) { console.error(e); m.reply(mess.error) }
-}
-break
-        
-case 'jadwalsholat': {
-if (!text) return m.reply(func.example(cmd, 'sukabumi'))
-try {
-await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
-const { default: axios } = require('axios')
-const res = await axios.get(`https://api.fasturl.link/religious/prayerschedule?city=${encodeURIComponent(text)}`)
-const data = res.data
-if (data.status !== 200 || !data.result) return m.reply('Jadwal tidak ditemukan!')
-const j = data.result
-let teks = `乂 JADWAL SHOLAT - ${j.city.toUpperCase()}\n\n`
-teks += `- Subuh: ${j.todaySchedule.shubuh}\n`
-teks += `- Dzuhur: ${j.todaySchedule.dzuhur}\n`
-teks += `- Ashar: ${j.todaySchedule.ashr}\n`
-teks += `- Maghrib: ${j.todaySchedule.maghrib}\n`
-teks += `- Isya: ${j.todaySchedule.isya}\n\n`
-teks += `Nearest prayer times: ${j.citynextPrayer}`
-m.reply(teks.trim())
-} catch (e) { console.error(e); m.reply(mess.error) }
-}
-break
-        
+       
 case 'ttstalk':
 case 'tiktokstalk': {
 if (!text) return m.reply(func.example(cmd, 'ryujinshihikaru'))
@@ -6543,10 +6564,6 @@ if (!yStr[fontNum]) return m.reply(`Font tidak tersedia. Gunakan angka 1 - ${tot
         
 case'alkitab':{if(!text)return m.reply(func.example(cmd,'nkjv Matius 1'));try{await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}});const[ver,buku,bab]=text.split` `;if(!ver||!buku||!bab)return m.reply(func.example(cmd,'nkjv Matius 1'));const{default:axios}=require('axios'),res=await axios.get(`https://api.fasturl.link/religious/alkitab?version=${ver}&book=${buku}&chapter=${bab}`),data=res.data;if(data.status!==200||!data.result?.verses)return m.reply('Gagal mengambil data.');const ayat=data.result.verses.map(v=>`${v.verse}. ${v.content}\n`).join`\n`;let teks=`乂 *A L K I T A B*\n\n- *Kitab* : ${data.result.book}\n- *Pasal* : ${data.result.chapter}\n- *Versi* : ${data.result.version.toUpperCase()}\n\n${ayat}`;erlic.sendMessage(m.chat,{text:teks},{quoted:m})}catch(e){console.error(e),m.reply(mess.error)}}break;
         
-case'murottal':{if(!text)return m.reply(func.example(cmd,'1'));try{await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}});const{default:axios}=require('axios'),res=await axios.get(`https://api.fasturl.link/religious/murottal?surah=${text}&language=id`),data=res.data;if(data.status!==200||!data.result?.files?.length)return m.reply('Surah tidak ditemukan atau gagal mengambil audio.');const a=data.result.files[0],{url,b:surahNumber,c:surahName,d:verses,e:juz,f:revelationPlace}=a;await erlic.sendMessage(m.chat,{audio:{url:url},mimetype:'audio/mpeg',ptt:false,contextInfo:{externalAdReply:{title:`${a.surahNumber} - ${a.surahName}`,body:`${a.verses} ayat - juz ${a.juz} - ${a.revelationPlace}`,thumbnailUrl:'https://files.catbox.moe/z19xq7.jpeg',sourceUrl:global.link,mediaType:1,renderLargerThumbnail:false,showAdAttribution:false}}},{quoted:m})}catch(err){console.error(err),m.reply(mess.error)}}break;
-        
- case'hadits':{if(!text)return m.reply(func.example(cmd,'Shahih Bukhari'));try{await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}});const{default:axios}=require('axios'),res=await axios.get(`https://api.fasturl.link/religious/hadits?name=${encodeURIComponent(text)}`),data=res.data;if(data.status!==200||!data.result?.length)return m.reply('Gagal mengambil hadits.');let teks=`乂 *H A D I T S*\n\n`;data.result.forEach((v,i)=>{teks+=`*${i+1}. ${v.title}*\n_${v.arabic}_\n\n${v.indonesia}\n\n`});erlic.sendMessage(m.chat,{text:teks.trim()},{quoted:m})}catch(e){console.error(e),m.reply(mess.error)}}break;
-
 case 'play':{if(!text)return m.reply(func.example(cmd,'homesick'));try{await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}});const yts=require('yt-search'),axios=require('axios'),{createCanvas,loadImage}=require('canvas');let search=await yts(text);if(!search?.videos?.length)return m.reply('Video tidak ditemukan');let url=search.videos[0].url,res=await axios.get(`https://izumiiiiiiii.dpdns.org/downloader/youtube?url=${encodeURIComponent(url)}&format=mp3`),data=res.data;if(!data.status||!data.result?.download)return m.reply('Gagal mengambil audio');let info=data.result,meta={title:info.title,author:{name:info.author.channelTitle},duration:{timestamp:info.metadata.duration},views:info.metadata.view,ago:info.metadata.ago,description:info.description,url:info.url},dl=info.download,img=info.thumbnail,canvas=createCanvas(800,400),ctx=canvas.getContext('2d'),thumb=await loadImage(img);ctx.fillStyle=ctx.createLinearGradient(0,0,0,400);ctx.fillStyle.addColorStop(0,'#121212');ctx.fillStyle.addColorStop(1,'#1f1f1f');ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(thumb,40,80,240,240);ctx.fillStyle='#fff';ctx.font='bold 28px Sans';let words=meta.title.split(' '),line='',y=150;for(let w of words){if(ctx.measureText(line+w).width>400){ctx.fillText(line.trim(),310,y);line='';y+=32}line+=w+' '}ctx.fillText(line.trim(),310,y);ctx.fillStyle='#b3b3b3';ctx.font='22px Sans';ctx.fillText(meta.author.name||'-',310,y+40);ctx.fillText(meta.duration.timestamp||'-',310,y+70);ctx.fillStyle='#555';ctx.fillRect(310,y+100,400,6);ctx.fillStyle='#1db954';ctx.fillRect(310,y+100,180,6);let buffer=canvas.toBuffer('image/png'),cap=`乂 *Y O U T U B E - P L A Y*\n\n∘ Title : ${meta.title}\n∘ Duration : ${meta.duration.timestamp||'-'}\n∘ Views : ${meta.views||'-'}\n∘ Upload : ${meta.ago||'-'}\n∘ Author : ${meta.author.name||'-'}\n∘ URL : ${meta.url}\n∘ Description: ${meta.description||'-'}\n\nPlease wait, the audio file is being sent...`,msg=await erlic.sendMessage(m.chat,{image:buffer,caption:cap,contextInfo:{externalAdReply:{title:meta.title,body:meta.author.name||'-',thumbnailUrl:img,sourceUrl:meta.url,mediaType:1,renderLargerThumbnail:true,showAdAttribution:false}}},{quoted:m});await erlic.sendMessage(m.chat,{audio:{url:dl},mimetype:'audio/mpeg',ptt:false},{quoted:msg})}catch(e){console.error(e);m.reply(mess.error)}}break;   
         
 case 'hidetag': case 'ht': case 'h': {
@@ -6657,53 +6674,7 @@ case 'clearsession': {
  });
 }
 break
-        
-case 'pinterest':
-case 'pin': {
-  if (!text) return erlic.sendMessage(m.chat, { text: func.example(cmd, 'anime') }, { quoted: m });
-  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
-
-  const axios = require('axios');
-  const query = encodeURIComponent(text.trim());
-
-  // === Hanya gunakan API Anomaki ===
-  const apiUrl = `https://www.apis-anomaki.zone.id/search/pinsearch?query=${query}`;
-  const response = await axios.get(apiUrl).catch(() => null);
-  const data = response?.data;
-
-  let imageUrls = [];
-
-  // Cek apakah respons valid
-  if (data?.status && Array.isArray(data.result)) {
-    imageUrls = data.result
-      .map(url => (url || '').trim())                  // Pastikan bukan null/undefined, lalu trim
-      .filter(url => url && url.startsWith('http'));  // Hanya URL valid yang dimasukkan
-  }
-
-  // Jika tidak ada gambar
-  if (imageUrls.length === 0) {
-    await m.reply('Gambar tidak ditemukan. Coba kata kunci lain.');
-    break;
-  }
-
-  // Batasi jumlah hasil
-  const results = isPrem ? imageUrls.slice(0, 10) : [imageUrls[0]];
-
-  // Kirim satu per satu
-  for (let i = 0; i < results.length; i++) {
-    const url = results[i];
-    const caption = i === 0 ? `Result for \`${text}\`` : null;
-
-    await erlic.sendMessage(m.chat, {
-      image: { url: url },
-      caption: caption
-    }, { quoted: m });
-  }
-
-  await erlic.sendMessage(m.chat, { react: { text: '✅', key: m.key } });
-  break;
-}
-        
+            
 case 'quickchat': case 'qc': { let colors = ["#000000", "#ff2414", "#22b4f2", "#eb13f2"]; let profilePicUrl; try { profilePicUrl = await erlic.profilePictureUrl(m.quoted ? m.quoted.sender : m.sender, 'image'); } catch (err) { profilePicUrl = 'https://telegra.ph/file/320b066dc81928b782c7b.png'; } let inputText = text || (m.quoted && m.quoted.text) || ''; if (!inputText) return erlic.sendMessage(m.chat, { text: func.example(cmd, `${global.botname} md`) }, { quoted: m }); await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } }); const quoteData = { type: "quote", format: "png", backgroundColor: "#ffffff", width: 512, height: 768, scale: 2, messages: [{ entities: [], avatar: true, from: { id: 1, name: m.pushName, photo: { url: profilePicUrl } }, text: inputText, replyMessage: {} }] }; try { const response = await axios.post('https://bot.lyo.su/quote/generate', quoteData, { headers: { 'Content-Type': 'application/json' } }); const stickerPackName = func.applywm(setting.packname, m.pushName || 'Sticker by erlic'); const stickerAuthor = func.applywm(setting.author, m.pushName || ''); const imageBuffer = Buffer.from(response.data.result.image, 'base64'); const sticker = new Sticker(imageBuffer, { pack: stickerPackName, author: stickerAuthor, id: 'https://instagram.com/arxhillie', type: StickerTypes.FULL }); const stickerBuffer = await sticker.toBuffer(); await erlic.sendMessage(m.chat, { sticker: stickerBuffer }, { quoted: m }); } catch (error) { console.error(error); m.reply(mess.errorstc); } } break;
         
 case 'brat': { let aA=text||(m.quoted&&m.quoted.text)||''; if(!aA) return erlic.sendMessage(m.chat,{text:func.example(cmd,`${global.botname} hai`)},{quoted:m}); if(aA.length>250) return m.reply('Maksimal 250 karakter.'); await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}}); let Ab=func.applywm(setting.packname,m.pushName||'Sticker by erlic'); let bB=func.applywm(setting.author,m.pushName||''); let Aa=await axios.get('https://aqul-brat.hf.space/?text='+encodeURIComponent(aA),{responseType:'arraybuffer'}); let aB=new Sticker(Aa.data,{pack:Ab,author:bB,type:StickerTypes.FULL,id:'https://instagram.com/brzee_.sky'}); let Ba=await aB.toBuffer(); await erlic.sendMessage(m.chat,{sticker:Ba},{quoted:m}); } break;
@@ -7890,1224 +7861,7 @@ case 'readmore': case 'rm': {
   m.reply(teks)
 }
   break
-    
-case 'buybibit': {
-    if (!global.db.users) global.db.users = {};
-    if (!global.db.users[m.sender]) {
-        global.db.users[m.sender] = new Proxy({}, {
-            get(target, prop) {
-                if (!(prop in target)) {
-                    if (['money'].includes(prop)) target[prop] = 0;
-                    else target[prop] = 0;
-                }
-                return target[prop];
-            },
-            set(target, prop, value) {
-                target[prop] = value;
-                return true;
-            }
-        });
-    }
-
-    let sender = global.db.users[m.sender];
-
-    const bibitNames = ['apel','anggur','mangga','jeruk','pisang','wortel','kentang','tomat','kubis','terong','labu'];
-    for (let bibit of bibitNames) sender['bibit'+bibit] = sender['bibit'+bibit] || 0;
-    sender.money = sender.money || 0;
-
-    const bibitList = bibitNames.map(name => ({ 
-        name, 
-        count: sender['bibit'+name], 
-        pricePerBibit: ['apel','anggur','mangga','jeruk','pisang'].includes(name) ? 1250 : 1000 
-    }));
-
-    let args = m.args && m.args.length ? m.args : m.text.trim().split(/\s+/).slice(1);
-let selectedNumber = (args[0] || '').replace(/[^0-9]/g, '');
-let optionIndex = Number(selectedNumber) - 1;
-
-    if (!selectedNumber) {
-        let menuMessage = `乂 *BUY BIBIT*\n\n` +
-            `1. Beli semua bibit\n` +
-            `2. Beli bibit yang kurang\n\n` +
-            `Ketik *${setting.prefix}buybibit <nomor>* untuk membeli.`;
-        return erlic.sendMessage(m.chat, { text: menuMessage }, { quoted: m });
-    }
-
-    if (isNaN(optionIndex) || optionIndex < 0 || optionIndex >= 2) {
-        return erlic.sendMessage(m.chat, { text: "Nomor opsi tidak valid. Silakan pilih nomor yang tersedia." }, { quoted: m });
-    }
-
-    let totalPrice = 0;
-    let purchaseMessage = `Pembelian Berhasil!\n\n`;
-
-    if (optionIndex === 1) { 
-        for (let bibit of bibitList) {
-            if (bibit.count < 100) {
-                let needed = 100 - bibit.count;
-                let price = needed * bibit.pricePerBibit;
-                purchaseMessage += `- Bibit ${bibit.name}: +${needed}\n`;
-                totalPrice += price;
-                sender['bibit'+bibit.name] += needed;
-            }
-        }
-    } else { 
-        for (let bibit of bibitList) {
-            let needed = 100;
-            let price = needed * bibit.pricePerBibit;
-            purchaseMessage += `- Bibit ${bibit.name}: +${needed}\n`;
-            totalPrice += price;
-            sender['bibit'+bibit.name] += needed;
-        }
-    }
-
-    if (totalPrice > 0) {
-        if (sender.money >= totalPrice) {
-            sender.money -= totalPrice;
-            purchaseMessage += `\n*Total Harga:* $${totalPrice.toLocaleString('en-US')}`;
-            return erlic.sendMessage(m.chat, { text: purchaseMessage }, { quoted: m });
-        } else {
-            return erlic.sendMessage(m.chat, {
-                text: `Uang kamu tidak cukup!\n\n` +
-                    `> Dibutuhkan: $${totalPrice.toLocaleString('en-US')}\n` +
-                    `> Uang kamu: $${sender.money.toLocaleString('en-US')}`
-            }, { quoted: m });
-        }
-    } else {
-        return erlic.sendMessage(m.chat, { text: 'Semua bibit sudah cukup, tidak ada yang perlu dibeli.' }, { quoted: m });
-    }
-}
-break;
-    
-case 'sell': {
-    const { createCanvas } = require('canvas');
-    const fs = require('fs');
-    const FormData = require('form-data');
-    const axios = require('axios');
-
-    function formatMoney(amount) {
-        return '$' + amount.toLocaleString('id-ID');
-    }
-
-    async function createTransactionImage(username, text) {
-        const canvas = createCanvas(800, 600);
-        const ctx = canvas.getContext('2d');
-
-        
-        ctx.fillStyle = '#f0f0f0';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        ctx.fillStyle = '#000';
-        ctx.font = 'bold 30px Arial';
-        ctx.fillText(`Username: ${username}`, 50, 50);
-        ctx.font = '24px Arial';
-        const lines = text.split('\n');
-        let y = 100;
-        lines.forEach(line => {
-            ctx.fillText(line, 50, y);
-            y += 40;
-        });
-
-        if (!fs.existsSync('./sampah')) fs.mkdirSync('./sampah', { recursive: true });
-
-        const imagePath = `./sampah/transaction_${Date.now()}.png`;
-        const buffer = canvas.toBuffer('image/png');
-        fs.writeFileSync(imagePath, buffer);
-
-        return imagePath;
-    }
-
-    let sender = new Proxy(global.db.users[m.sender] || {}, {
-        get(target, prop) { return prop in target ? target[prop] : 0 },
-        set(target, prop, value) { target[prop] = value; return true }
-    });
-
-    const items = {
-        bibit: {
-            bibitanggur: { price: 1000, icon: '🍇' },
-            bibitapel: { price: 1000, icon: '🍎' },
-            bibitjeruk: { price: 1000, icon: '🍊' },
-            bibitmangga: { price: 1000, icon: '🥭' },
-            bibitpisang: { price: 1000, icon: '🍌' },
-            bibitwortel: { price: 500, icon: '🥕' },
-            bibitlabu: { price: 500, icon: '🎃' },
-            bibitkubis: { price: 500, icon: '🥬' },
-            bibitterong: { price: 500, icon: '🍆' },
-            bibitkentang: { price: 500, icon: '🥔' },
-            bibittomat: { price: 500, icon: '🍅' },
-        },
-        buah: {
-            anggur: { price: 1000, icon: '🍇' },
-            apel: { price: 1000, icon: '🍎' },
-            jeruk: { price: 1000, icon: '🍊' },
-            mangga: { price: 1000, icon: '🥭' },
-            pisang: { price: 1000, icon: '🍌' },
-        },
-        sayur: {
-            wortel: { price: 750, icon: '🥕' },
-            labu: { price: 750, icon: '🎃' },
-            kubis: { price: 750, icon: '🥬' },
-            terong: { price: 750, icon: '🍆' },
-            kentang: { price: 1000, icon: '🥔' },
-            tomat: { price: 1000, icon: '🍅' },
-        },
-        hewan: {
-            banteng: { price: 1000, icon: '🐂' },
-            harimau: { price: 1000, icon: '🐅' },
-            gajah: { price: 1000, icon: '🐘' },
-            kambing: { price: 1000, icon: '🐐' },
-            panda: { price: 1000, icon: '🐼' },
-            buaya: { price: 1000, icon: '🐊' },
-            kerbau: { price: 1000, icon: '🐃' },
-            sapi: { price: 1000, icon: '🐄' },
-            monyet: { price: 1000, icon: '🐒' },
-            babi: { price: 1000, icon: '🐖' },
-            babihutan: { price: 1000, icon: '🐗' },
-            ayam: { price: 1000, icon: '🐓' },
-        },
-        seafood: {
-            tongkol: { price: 1000, icon: '🐟' },
-            buntal: { price: 1000, icon: '🐡' },
-            kepiting: { price: 1000, icon: '🦀' },
-            udang: { price: 1000, icon: '🦐' },
-            kerang: { price: 1000, icon: '🐚' },
-            pausmini: { price: 1000, icon: '🐋' },
-            gurita: { price: 1000, icon: '🐙' },
-            nila: { price: 1000, icon: '🐠' },
-            cumi: { price: 1000, icon: '🦑' },
-            langka: { price: 1000, icon: '🐳' },
-        },
-        sampah: {
-            plastik: { price: 100, icon: '🍶' },
-            batu: { price: 100, icon: '🪨' },
-            kardus: { price: 100, icon: '📦' },
-            kaleng: { price: 100, icon: '🥫' },
-            daun: { price: 100, icon: '🍂' },
-            trash: { price: 100, icon: '🗑️' },
-        },
-        spaces: {
-            meteorit: { price: 100, icon: '☄️' },
-            crystal: { price: 100, icon: '💎' },
-            metal: { price: 100, icon: '🔩' },
-            stardust: { price: 100, icon: '✨' },
-            alien_artifact: { price: 100, icon: '🛸' },
-            moon_rock: { price: 100, icon: '🌑' },
-            unknown_substance: { price: 100, icon: '🧪' },
-        }
-    };
-
-    const categories = Object.keys(items);
-
-    if (!text) {
-        let teks = '';
-        for (const category of categories) {
-            let totalCategoryItems = Object.keys(items[category]).reduce((sum, itemName) => sum + sender[itemName], 0);
-            teks += `*${category.toUpperCase()}*\n\`\`\`\n`;
-            teks += `No. | Item             | Harga\n`;
-            teks += `--------------------------------\n`;
-            let idx = 1;
-            Object.entries(items[category]).forEach(([name, item]) => {
-                teks += `${idx.toString().padEnd(3)} | ${item.icon} ${name.padEnd(15)} | ${formatMoney(item.price)}\n`;
-                idx++;
-            });
-            teks += `--------------------------------\n\`\`\`\n`;
-            teks += `Kamu memiliki ${totalCategoryItems} ${category}.\n`;
-            teks += `> ${setting.prefix + command} ${category} untuk menjual semua ${category}.\n\n`;
-        }
-        teks += `Contoh: ${setting.prefix + command} wortel 50`;
-        return erlic.sendMessage(m.chat, { text: teks }, { quoted: m });
-    }
-
-    const args = text.split(/\s+/);
-    const itemToSell = args[0].toLowerCase();
-    const sellAmount = parseInt(args[1], 10);
-
-    const sellAll = async (category) => {
-        let totalProfit = 0, totalItems = 0;
-        Object.entries(items[category]).forEach(([name, item]) => {
-            if (sender[name] > 0) {
-                totalProfit += sender[name] * item.price;
-                totalItems += sender[name];
-                sender.money += sender[name] * item.price;
-                sender[name] = 0;
-            }
-        });
-        if (totalProfit === 0) return erlic.sendMessage(m.chat, { text: `Kamu tidak memiliki ${category} untuk dijual!` }, { quoted: m });
-
-        const teks = `乂 *TRANSACTION - SELL*\nProduct: ALL ${category.toUpperCase()}\nCount: ${totalItems}\nTotal: ${formatMoney(totalProfit)}\nStatus: Success ✅`;
-
-        const imagePath = await createTransactionImage(sender.username || m.pushName, teks);
-        const media = fs.readFileSync(imagePath);
-
-        const form = new FormData();
-        form.append('reqtype', 'fileupload');
-        form.append('fileToUpload', media, 'transaction.png');
-
-        let url;
-        try {
-            const upload = await axios.post('https://catbox.moe/user/api.php', form, {
-                headers: form.getHeaders()
-            });
-            url = upload.data.trim();
-        } catch (err) {
-            console.error('Upload failed:', err.message);
-            // fs.unlinkSync(imagePath); 
-            return erlic.sendMessage(m.chat, { text: 'Gagal mengunggah gambar. Transaksi berhasil, tapi tanpa gambar.' }, { quoted: m });
-        }
-
-        //fs.unlinkSync(imagePath);
-
-        return erlic.sendMessage(m.chat, {
-            text: teks,
-            contextInfo: {
-                externalAdReply: {
-                    title: 'TRANSACTION - SELL',
-                    body: global.header || 'Farming Bot',
-                    thumbnailUrl: url,
-                    renderLargerThumbnail: true
-                }
-            }
-        }, { quoted: m });
-    };
-
-    if (categories.includes(itemToSell)) return sellAll(itemToSell);
-
-    let itemSell = null;
-    let foundCategory = '';
-    for (const category of categories) {
-        if (items[category][itemToSell]) {
-            itemSell = items[category][itemToSell];
-            foundCategory = category;
-            break;
-        }
-    }
-
-    if (!itemSell) return erlic.sendMessage(m.chat, { text: `Item "${itemToSell}" tidak ditemukan!` }, { quoted: m });
-    if (isNaN(sellAmount) || sellAmount <= 0) return erlic.sendMessage(m.chat, { text: 'Jumlah harus > 0!' }, { quoted: m });
-    if (sender[itemToSell] < sellAmount) return erlic.sendMessage(m.chat, { text: `Kamu tidak memiliki cukup ${itemToSell}!` }, { quoted: m });
-
-    const totalSellPrice = itemSell.price * sellAmount;
-    sender.money += totalSellPrice;
-    sender[itemToSell] -= sellAmount;
-
-    const teks = `乂 *TRANSACTION - SELL*\nProduct: ${itemSell.icon} ${itemToSell.toUpperCase()}\nCount: ${sellAmount}\nPrice: ${formatMoney(itemSell.price)}\nTotal: ${formatMoney(totalSellPrice)}\nStatus: Success ✅`;
-
-    const imagePath = await createTransactionImage(sender.username || m.pushName, teks);
-    const media = fs.readFileSync(imagePath);
-
-    const form = new FormData();
-    form.append('reqtype', 'fileupload');
-    form.append('fileToUpload', media, 'transaction.png');
-
-    let url;
-    try {
-        const upload = await axios.post('https://catbox.moe/user/api.php', form, {
-            headers: form.getHeaders()
-        });
-        url = upload.data.trim();
-    } catch (err) {
-        console.error('Upload failed:', err.message);
-      //  return erlic.sendMessage(m.chat, { text: 'Gagal mengunggah gambar. Transaksi berhasil, tapi tanpa gambar.' }, { quoted: m });
-    }
-
-    
-   fs.unlinkSync(imagePath);
-
-    return erlic.sendMessage(m.chat, {
-        text: teks,
-        contextInfo: {
-            externalAdReply: {
-                title: 'TRANSACTION - SELL',
-                body: global.header || 'Farming Bot',
-                thumbnailUrl: url,
-                renderLargerThumbnail: true
-            }
-        }
-    }, { quoted: m });
-
-} break;
-    
-case 'buy': {
-    const { createCanvas } = require('canvas');
-    const fs = require('fs');
-    const FormData = require('form-data');
-    const axios = require('axios');
-
-    if (!global.db.users) global.db.users = {};
-    if (!global.db.users[m.sender]) global.db.users[m.sender] = {};
-
-    let sender = new Proxy(global.db.users[m.sender], {
-        get(target, prop) {
-            if (!(prop in target)) target[prop] = 0;
-            return target[prop];
-        },
-        set(target, prop, value) {
-            target[prop] = value;
-            return true;
-        }
-    });
-
-    function formatMoney(amount) {
-        return '$' + amount.toLocaleString('id-ID');
-    }
-
-    async function createTransactionImage(username, text) {
-        const canvas = createCanvas(800, 600);
-        const ctx = canvas.getContext('2d');
-
-        ctx.fillStyle = '#f8f9fa';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        ctx.fillStyle = '#000';
-        ctx.font = 'bold 30px Arial';
-        ctx.fillText(`Pembeli: ${username}`, 50, 50);
-
-        ctx.font = '24px Arial';
-        const lines = text.split('\n');
-        let y = 100;
-        lines.forEach(line => {
-            if (line.trim()) {
-                ctx.fillText(line, 50, y);
-                y += 40;
-            }
-        });
-
-        if (!fs.existsSync('./sampah')) fs.mkdirSync('./sampah', { recursive: true });
-        const imagePath = `./sampah/buy_${Date.now()}.png`;
-        const buffer = canvas.toBuffer('image/png');
-        fs.writeFileSync(imagePath, buffer);
-
-        return imagePath;
-    }
-
-    const items = {
-        Bumbu: {
-            bawang: { price: 300, icon: '🧄' },
-            kemiri: { price: 500, icon: '🌰' },
-            jahe: { price: 800, icon: '🫚' },
-            asam: { price: 400, icon: '🍋' },
-            cabai: { price: 700, icon: '🌶️' },
-            saus: { price: 350, icon: '🍾' },
-        },
-        Ternak: {
-            ayam: { price: 2000, icon: '🐓' },
-            babi: { price: 5000, icon: '🐖' },
-            babihutan: { price: 10000, icon: '🐗' },
-            banteng: { price: 20000, icon: '🐂' },
-            kambing: { price: 15000, icon: '🐐' },
-            kerbau: { price: 30000, icon: '🐃' },
-            panda: { price: 50000, icon: '🐼' },
-            sapi: { price: 50000, icon: '🐄' },
-            monyet: { price: 25000, icon: '🐒' },
-        },
-        Buah: {
-            anggur: { price: 200, icon: '🍇' },
-            apel: { price: 500, icon: '🍎' },
-            jeruk: { price: 1000, icon: '🍊' },
-            mangga: { price: 1500, icon: '🥭' },
-            pisang: { price: 3000, icon: '🍌' },
-        },
-        Sayur: {
-            wortel: { price: 750, icon: '🥕' },
-            labu: { price: 750, icon: '🎃' },
-            kubis: { price: 750, icon: '🥬' },
-            terong: { price: 750, icon: '🍆' },
-            kentang: { price: 1000, icon: '🥔' },
-            tomat: { price: 1000, icon: '🍅' },
-        },
-        Tambang: {
-            rock: { price: 8000, icon: '🪨' },
-            diamond: { price: 100000, icon: '💎' },
-            emerald: { price: 90000, icon: '🟢' },
-            gold: { price: 70000, icon: '🥇' },
-            iron: { price: 60000, icon: '⛏️' },
-        },
-        Seafood: {
-            tongkol: { price: 3000, icon: '🐟' },
-            buntal: { price: 5000, icon: '🐡' },
-            pausmini: { price: 8000, icon: '🐋' },
-            udang: { price: 4000, icon: '🦐' },
-            gurita: { price: 7000, icon: '🐙' },
-            nila: { price: 3500, icon: '🐠' },
-            cumi: { price: 6000, icon: '🦑' },
-            langka: { price: 12000, icon: '🐳' },
-            kepiting: { price: 5000, icon: '🦀' },
-            kerang: { price: 3000, icon: '🐚' },
-        },
-    };
-
-    const args = text.trim().split(/\s+/);
-    const itemNameRaw = args[0];
-    const countRaw = args[1];
-
-    if (!text) {
-        let teks = '';
-        for (const [category, categoryItems] of Object.entries(items)) {
-            teks += `*${category.toUpperCase()}*\n\`\`\`\n`;
-            teks += `No. | Nama Item          | Harga    \n`;
-            teks += `--------------------------------\n`;
-
-            let index = 1;
-            for (const [itemName, item] of Object.entries(categoryItems)) {
-                const number = index.toString().padEnd(3);
-                const itemText = `${item.icon} ${itemName}`.padEnd(20);
-                const price = formatMoney(item.price).padStart(8);
-                teks += `${number} | ${itemText} | ${price}\n`;
-                index++;
-            }
-
-            teks += `--------------------------------\n\`\`\`\n`;
-        }
-
-        teks += `> Contoh: ${setting.prefix + command} apel 5\n> Uang kamu: *${formatMoney(sender.money)}*`;
-        return erlic.sendMessage(m.chat, { text: teks }, { quoted: func.fstatus("STORE - BUY") });
-    }
-
-    if (!itemNameRaw) {
-        return erlic.sendMessage(m.chat, { text: 'Silakan masukkan nama item yang ingin dibeli.' }, { quoted: m });
-    }
-
-    const itemName = itemNameRaw.toLowerCase();
-    const count = Math.max(1, parseInt(countRaw) || 1);
-
-    if (count <= 0) {
-        return erlic.sendMessage(m.chat, { text: 'Jumlah item harus lebih dari 0.' }, { quoted: m });
-    }
-
-    let foundItem = null;
-    for (const categoryItems of Object.values(items)) {
-        if (categoryItems[itemName]) {
-            foundItem = categoryItems[itemName];
-            break;
-        }
-    }
-
-    if (!foundItem) {
-        return erlic.sendMessage(m.chat, { text: `Item "${itemName}" tidak ditemukan!` }, { quoted: m });
-    }
-
-    const totalPrice = foundItem.price * count;
-
-    if (sender.money < totalPrice) {
-        return erlic.sendMessage(m.chat, {
-            text: `Uang kamu tidak cukup untuk membeli ${count} ${itemName}.\n` +
-                `> Uang kamu: *${formatMoney(sender.money)}*\n> Dibutuhkan: *${formatMoney(totalPrice)}*`
-        }, { quoted: m });
-    }
-
-    
-    sender.money -= totalPrice;
-    sender[itemName] = (sender[itemName] || 0) + count;
-
-    const teks = `乂 *TRANSACTION - BUY*\n\n` +
-        `- *Product* : ${foundItem.icon} ${itemName}\n` +
-        `- *Count*   : ${count}\n` +
-        `- *Price*   : ${formatMoney(foundItem.price)}\n` +
-        `- *Total*   : ${formatMoney(totalPrice)}\n` +
-        `- *Status*  : Success ✅`;
-
-    const imagePath = await createTransactionImage(sender.username, teks);
-    const media = fs.readFileSync(imagePath);
-
-    const form = new FormData();
-    form.append('reqtype', 'fileupload');
-    form.append('fileToUpload', media, 'buy_transaction.png');
-
-    let url;
-    try {
-        const upload = await axios.post('https://catbox.moe/user/api.php', form, {
-            headers: form.getHeaders()
-        });
-        url = upload.data.trim();
-    } catch (err) {
-        fs.unlinkSync(imagePath);
-        return erlic.sendMessage(m.chat, {
-            text: 'Gagal mengunggah gambar. Transaksi berhasil tanpa gambar.'
-        }, { quoted: m });
-    }
-
-    fs.unlinkSync(imagePath);
-
-    return erlic.sendMessage(m.chat, {
-        text: teks,
-        contextInfo: {
-            externalAdReply: {
-                title: 'TRANSACTION - BUY',
-                body: global.header || 'Farming Bot',
-                thumbnailUrl: url,
-                renderLargerThumbnail: true
-            }
-        }
-    }, { quoted: m });
-
-} break;
-    
-case 'inv':
-case 'inventory': {
-    await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } });
-
-    if (!global.db.users) global.db.users = {};
-    if (!global.db.users[m.sender]) global.db.users[m.sender] = {};
-
-    let user = new Proxy(global.db.users[m.sender], {
-        get(target, prop) {
-            if (!(prop in target)) target[prop] = 0;
-            return target[prop];
-        }
-    });
-
-    function formatMoney(amount) {
-        return '$' + amount.toLocaleString('id-ID');
-    }
-
-    const stamina = user.stamina || 0;
-    const money = formatMoney(user.money) || 0;
-    const exp = user.exp || 0;
-    const level = user.level || 1;
-    const order = user.order || 0;
-    const role = user.role || 'Bronze';
-    const expRequired = 10 * Math.pow(level, 2) + 50 * level + 100;
-
-    const categories = {
-        Masakan: {
-            steak: user.steak, sate: user.sate, rendang: user.rendang, kornet: user.kornet,
-            nugget: user.nugget, bluefin: user.bluefin, seafood: user.seafood, moluska: user.moluska,
-            sushi: user.sushi, squidprawm: user.squidprawm
-        },
-        Bumbu: {
-            kemiri: user.kemiri, bawang: user.bawang, cabai: user.cabai,
-            saus: user.saus, asam: user.asam, jahe: user.jahe
-        },
-        Buah: {
-            anggur: user.anggur, apel: user.apel, jeruk: user.jeruk,
-            mangga: user.mangga, pisang: user.pisang
-        },
-        Sayur: {
-            tomat: user.tomat, kubis: user.kubis, labu: user.labu,
-            kentang: user.kentang, terong: user.terong, wortel: user.wortel
-        },
-        Trash: {
-            daun: user.daun, kardus: user.kardus, kaleng: user.kaleng,
-            kayu: user.kayu, plastik: user.plastik, trash: user.trash
-        },
-        Tambang: {
-            diamond: user.diamond, iron: user.iron, gold: user.gold,
-            emerald: user.emerald
-        },
-        Kolam: {
-            tongkol: user.tongkol, pausmini: user.pausmini, kepiting: user.kepiting,
-            buntal: user.buntal, udang: user.udang, cumi: user.cumi, gurita: user.gurita,
-            nila: user.nila, langka: user.langka, kerang: user.kerang
-        },
-        Hewan: {
-            ayam: user.ayam, babi: user.babi, babihutan: user.babihutan,
-            banteng: user.banteng, buaya: user.buaya, gajah: user.gajah,
-            harimau: user.harimau, kerbau: user.kerbau, monyet: user.monyet,
-            panda: user.panda, sapi: user.sapi
-        },
-        'Space Items': {
-            meteorit: user.meteorit, crystal: user.crystal, metal: user.metal,
-            stardust: user.stardust, alien_artifact: user.alien_artifact,
-            moon_rock: user.moon_rock, unknown_substance: user.unknown_substance
-        }
-    };
-
-    const weaponsAndArmor = {
-        sword: { count: user.sword, durability: user.durabilitiesSword },
-        bow: { count: user.bow, durability: user.durabilitiesBow },
-        pickaxe: { count: user.pickaxe, durability: user.durabilitiesPickaxe },
-        axe: { count: user.axe, durability: user.durabilitiesAxe },
-        armor: { count: user.armor, durability: user.durabilitiesArmor },
-        fishingrod: { count: user.fishingrod, durability: user.durabilitiesFishingrod }
-    };
-
-    let inventoryText = `*Stamina:* ${stamina}/100\n`;
-    inventoryText += `*Money:* ${money}\n`;
-    inventoryText += `*Exp:* ${exp} / ${expRequired}\n`;
-    inventoryText += `*Role:* ${role}\n`;
-    inventoryText += `*Orderan:* ${order}\n\n`;
-
-    for (let [title, items] of Object.entries(categories)) {
-        inventoryText += `*${title.toUpperCase()}*\n`;
-        for (let [item, count] of Object.entries(items)) {
-            const formattedItem = item.charAt(0).toUpperCase() + item.slice(1).replace('_', ' ');
-            inventoryText += `- ${formattedItem}: ${count}\n`;
-        }
-        inventoryText += `\n`;
-    }
-
-    let weaponText = '*WEAPON & ARMOR*\n';
-    for (let [item, { count, durability }] of Object.entries(weaponsAndArmor)) {
-        const formattedItem = item.charAt(0).toUpperCase() + item.slice(1);
-        weaponText += `- ${formattedItem}: ${count} (Durability: ${durability})\n`;
-    }
-    inventoryText += weaponText;
-
-    let profilePicUrl = setting.cover;
-    try {
-        const profilePic = await erlic.profilePictureUrl(m.sender, 'image');
-        if (profilePic) profilePicUrl = profilePic;
-    } catch (e) {
-        // console.log('Gagal ambil foto profil, pakai default.');
-    }
-
-    await erlic.sendMessage(m.chat, {
-        text: inventoryText,
-        contextInfo: {
-            externalAdReply: {
-                title: `INVENTORY - ${m.pushName ? m.pushName.toUpperCase() : users.name}`,
-                body: global.header,
-                mediaType: 1,
-                renderLargerThumbnail: true,
-                thumbnailUrl: profilePicUrl,
-                sourceUrl: ''
-            }
-        }
-    }, { quoted: func.fstatus("INVENTORY") });
-
-    break;
-}
-    
-case 'gudang': {
-    if (!global.db.users) global.db.users = {};
-    if (!global.db.users[m.sender]) {
-        global.db.users[m.sender] = new Proxy({}, {
-            get(target, prop) {
-                if (!(prop in target)) target[prop] = 0;
-                return target[prop];
-            },
-            set(target, prop, value) {
-                target[prop] = value;
-                return true;
-            }
-        });
-    }
-
-    const user = global.db.users[m.sender];
-
-    const { 
-        pisang, anggur, mangga, jeruk, apel, 
-        bibitanggur, bibitapel, bibitpisang, bibitmangga, bibitjeruk,
-        wortel, kentang, tomat, kubis, terong, labu,
-        bibitwortel, bibitkentang, bibittomat, bibitkubis, bibitterong, bibitlabu
-    } = user;
-
-    const gudangInfo = `*HASIL PANEN BUAH*
-🍌 = *[ ${pisang || 0} ]* Buah Pisang
-🍇 = *[ ${anggur || 0 } ]* Buah Anggur
-🥭 = *[ ${mangga || 0} ]* Buah Mangga
-🍊 = *[ ${jeruk || 0} ]* Buah Jeruk
-🍎 = *[ ${apel || 0} ]* Buah Apel    
-
-*HASIL PANEN SAYUR*
-🥕 = *[ ${wortel || 0} ]* Wortel
-🥔 = *[ ${kentang||0} ]* Kentang
-🍅 = *[ ${tomat||0} ]* Tomat
-🥬 = *[ ${kubis||0} ]* Kubis
-🍆 = *[ ${terong||0} ]* Terong
-🎃 = *[ ${labu||0} ]* Labu
-
-*BIBIT BUAH*
-🌾 = *[ ${bibitpisang||0} ]* Bibit Pisang
-🌾 = *[ ${bibitanggur||0} ]* Bibit Anggur
-🌾 = *[ ${bibitmangga||0} ]* Bibit Mangga
-🌾 = *[ ${bibitjeruk||0} ]* Bibit Jeruk
-🌾 = *[ ${bibitapel||0} ]* Bibit Apel    
-
-*BIBIT SAYUR*
-🌱 = *[ ${bibitwortel||0} ]* Bibit Wortel
-🌱 = *[ ${bibitkentang||0} ]* Bibit Kentang
-🌱 = *[ ${bibittomat||0} ]* Bibit Tomat
-🌱 = *[ ${bibitkubis||0} ]* Bibit Kubis
-🌱 = *[ ${bibitterong||0} ]* Bibit Terong
-🌱 = *[ ${bibitlabu||0} ]* Bibit Labu
-
-> Ketik: ${setting.prefix}sell item count untuk menjual buah atau sayur.
-> Contoh: ${setting.prefix}sell pisang 50`;
-
-    erlic.sendMessage(m.chat, {
-        text: gudangInfo,
-        contextInfo: {
-            externalAdReply: {
-                title: '乂 G U D A N G',
-                body: global.header,
-                thumbnailUrl: 'https://files.catbox.moe/qvla2i.jpg',
-                sourceUrl: '',
-                mediaType: 1,
-                renderLargeThumbnail: true
-            }
-        }
-    }, { quoted: m });
-}
-break;
-    
-case 'create': {
-    if (!global.db.users) global.db.users = {};
-    if (!global.db.users[m.sender]) {
-        global.db.users[m.sender] = new Proxy({}, {
-            get(target, prop) {
-                if (!(prop in target)) {
-                    
-                    if (['stamina','money','exp','plastik','rock','kardus','kaleng','daun','trash','string'].includes(prop)) return 0;
-                    if (['sword','armor','bow','axe','pickaxe','fishingrod','atm'].includes(prop)) return 0;
-                    if (['durabilitiesSword','durabilitiesArmor','durabilitiesBow','durabilitiesAxe','durabilitiesPickaxe','durabilitiesFishingrod'].includes(prop)) return 0;
-         
-                    return null;
-                }
-                return target[prop];
-            },
-            set(target, prop, value) {
-                target[prop] = value;
-                return true;
-            }
-        });
-    }
-
-    const user = global.db.users[m.sender];
-    if (!user.register) return erlic.sendMessage(m.chat, { text: 'User tidak ditemukan di database. Pastikan Anda sudah terdaftar!' }, { quoted: m });
-
-    const isPremium = user.premium || false;
-
-    const items = {
-        sword: { materials: { rock: 50, kayu: 100 }, money: 15000 },
-        pickaxe: { materials: { rock: 65, kayu: 120 }, money: 15000 },
-        bow: { materials: { rock: 55, kayu: 125, string: 80 }, money: 20000 },
-        axe: { materials: { rock: 125, kayu: 150 }, money: 15000 },
-        armor: { materials: { iron: 10, string: 50 }, money: 20000 },
-        fishingrod: { materials: { kayu: 100, string: 60 }, money: 150000 },
-        atm: { materials: {}, money: 100000 },
-    };
-
-    const args = text.split(/\s+/);
-    const itemName = args[0]?.toLowerCase();
-    const count = parseInt(args[1], 10) || 1;
-
-    if (!items[itemName] && itemName !== 'hunt') return erlic.sendMessage(m.chat, { text: `Item "${itemName}" tidak ditemukan!` }, { quoted: m });
-
-    if (itemName === 'atm' && user.kuli) return erlic.sendMessage(m.chat, { text: 'Kamu sudah memiliki ATM!' }, { quoted: m });
-
-    if (itemName === 'hunt') {
-        const requiredItems = ['armor', 'sword', 'bow'];
-        let totalMoneyCost = 0;
-        let totalMaterials = {};
-
-        for (const item of requiredItems) {
-            const multiplier = isPremium ? { material: 3, money: 2 } : { material: 1, money: 1 };
-            totalMoneyCost += items[item].money * multiplier.money;
-            for (const [mat, qty] of Object.entries(items[item].materials)) {
-                totalMaterials[mat] = (totalMaterials[mat] || 0) + qty * multiplier.material;
-            }
-        }
-
-        if (user.money < totalMoneyCost) return erlic.sendMessage(m.chat, { text: `Uang kamu tidak cukup untuk membeli perlengkapan berburu!\nDibutuhkan: *$${totalMoneyCost}*\nSaldo kamu: *$${user.money}*` }, { quoted: m });
-
-        for (const [mat, qty] of Object.entries(totalMaterials)) {
-            if ((user[mat] || 0) < qty) return erlic.sendMessage(m.chat, { text: `Bahan *${mat}* tidak cukup!\nDibutuhkan: *${qty}*\nKamu punya: *${user[mat] || 0}*` }, { quoted: m });
-        }
-
-        user.money -= totalMoneyCost;
-        for (const [mat, qty] of Object.entries(totalMaterials)) user[mat] -= qty;
-
-        for (const item of requiredItems) user[item] = (user[item] || 0) + 1;
-        user.durabilitiesSword = (user.durabilitiesSword || 0) + 100;
-        user.durabilitiesArmor = (user.durabilitiesArmor || 0) + 100;
-        user.durabilitiesBow = (user.durabilitiesBow || 0) + 100;
-
-        return erlic.sendMessage(m.chat, { text: `Berhasil membuat perlengkapan berburu!\n+1 *Armor*\n+1 *Sword*\n+1 *Bow*` }, { quoted: m });
-    }
-
-    const foundItem = items[itemName];
-    const multiplier = isPremium ? { material: 3, money: 2 } : { material: 1, money: 1 };
-    const totalMoneyCost = foundItem.money * count * multiplier.money;
-
-    if (user.money < totalMoneyCost) return erlic.sendMessage(m.chat, { text: `Uang kamu tidak cukup untuk membuat ${itemName} x${count}.\nDibutuhkan: *$${totalMoneyCost}*\nSaldo kamu: *$${user.money}*` }, { quoted: m });
-
-    for (const [mat, qty] of Object.entries(foundItem.materials)) {
-        const requiredQty = qty * count * multiplier.material;
-        if ((user[mat] || 0) < requiredQty) return erlic.sendMessage(m.chat, { text: `Bahan *${mat}* tidak cukup!\nDibutuhkan: *${requiredQty}*\nKamu punya: *${user[mat] || 0}*` }, { quoted: m });
-    }
-
-    user.money -= totalMoneyCost;
-    for (const [mat, qty] of Object.entries(foundItem.materials)) user[mat] -= qty * count * multiplier.material;
-    user[itemName] = (user[itemName] || 0) + count;
-
-    const durability = 100;
-    if (itemName === 'sword') user.durabilitiesSword = (user.durabilitiesSword || 0) + durability * count;
-    if (itemName === 'armor') user.durabilitiesArmor = (user.durabilitiesArmor || 0) + durability * count;
-    if (itemName === 'bow') user.durabilitiesBow = (user.durabilitiesBow || 0) + durability * count;
-    if (itemName === 'axe') user.durabilitiesAxe = (user.durabilitiesAxe || 0) + durability * count;
-    if (itemName === 'pickaxe') user.durabilitiesPickaxe = (user.durabilitiesPickaxe || 0) + durability * count;
-    if (itemName === 'fishingrod') user.durabilitiesFishingrod = (user.durabilitiesFishingrod || 0) + durability * count;
-
-    if (itemName === 'atm') user.kuli = true;
-
-    return erlic.sendMessage(m.chat, { text: `Berhasil membuat *${count} ${itemName.charAt(0).toUpperCase() + itemName.slice(1)}*!` }, { quoted: m });
-}
-break;
-    
-case 'kandang': {
-    const user = global.db.users[m.sender];
-    const { banteng, harimau, gajah, kambing, panda, buaya, kerbau, sapi, monyet, babi, babihutan, ayam } = user;
-
-    const ndy = `- 🐂 = *[ ${banteng} ]* Ekor Banteng
-- 🐅 = *[ ${harimau ||0} ]* Ekor Harimau
-- 🐘 = *[ ${gajah||0} ]* Ekor Gajah
-- 🐐 = *[ ${kambing||0} ]* Ekor Kambing
-- 🐼 = *[ ${panda||0} ]* Ekor Panda
-- 🐊 = *[ ${buaya||0} ]* Ekor Buaya
-- 🐃 = *[ ${kerbau||0} ]* Ekor Kerbau
-- 🐮 = *[ ${sapi||0} ]* Ekor Sapi
-- 🐒 = *[ ${monyet||0} ]* Ekor Monyet
-- 🐗 = *[ ${babihutan||0} ]* Ekor Babi Hutan
-- 🐖 = *[ ${babi||0} ]* Ekor Babi
-- 🐓 = *[ ${ayam||0} ]* Ekor Ayam`;
-
-    erlic.sendMessage(
-      m.chat,
-      {
-        text: ndy,
-        contextInfo: {
-          externalAdReply: {
-            title: '乂 K A N D A N G',
-            body: global.header,
-            mediaType: 1,
-            renderLargeThumbnail: true,
-            thumbnailUrl: 'https://files.catbox.moe/ptbfe4.jpg'
-          }
-        }
-      },
-      { quoted: m }
-    );
-}
-break;
-    
-case 'adv':
-case 'adventure': {
-    const cooldownFree = 1800000;
-    const cooldownPremium = 600000;
-
-    if (!global.db.users) global.db.users = {};
-
-    function inisialisasi(sender) {
-        if (!global.db.users[sender]) {
-            global.db.users[sender] = new Proxy({}, {
-                get(target, prop) {
-                    if (!(prop in target)) target[prop] = 0;
-                    return target[prop];
-                },
-                set(target, prop, value) {
-                    target[prop] = value;
-                    return true;
-                }
-            });
-        }
-        return global.db.users[sender];
-    }
-
-    function initRewards(user) {
-        const fields = ['stamina','money','exp','plastik','rock','kardus','kaleng','daun','trash','string','lastadventure'];
-        for (const f of fields) {
-            if (user[f] === undefined || user[f] === null) user[f] = f === 'stamina' ? 100 : 0;
-        }
-    }
-
-    const user = inisialisasi(m.sender);
-    initRewards(user);
-
-    if (!user.register) {
-        return erlic.sendMessage(m.chat, { text: 'User tidak ditemukan di database. Pastikan anda sudah melakukan registrasi!' }, { quoted: m });
-    }
-
-    if (user.stamina < 20) {
-        return erlic.sendMessage(m.chat, { text: `Stamina kurang dari 20. Gunakan command *${global.db.settings?.prefix || '.'}heal*.` }, { quoted: m });
-    }
-
-    const cooldown = user.premium ? cooldownPremium : cooldownFree;
-    const timeElapsed = Date.now() - (user.lastadventure || 0);
-
-    if (timeElapsed < cooldown) {
-        const remainingTime = cooldown - timeElapsed;
-        return erlic.sendMessage(m.chat, { text: `Tunggu *${func.msToTime(remainingTime)}* lagi untuk petualangan berikutnya.` }, { quoted: m });
-    }
-
-    user.lastadventure = Date.now();
-    user.stamina -= 5;
-
-    await erlic.sendMessage(m.chat, { text: "_Petualangan dimulai..._" }, { quoted: m });
-    await new Promise(resolve => setTimeout(resolve, 10000));
-
-    const minRange = user.premium ? 100 : 0;
-    const maxRange = user.premium ? 5000 : 200;
-
-    const rewards = {
-        money: Math.floor(Math.random() * (8000 - 2000 + 1)) + 2000,
-        exp: Math.floor(Math.random() * (7000 - 1000 + 1)) + 1000,
-        plastik: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
-        rock: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
-        kardus: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
-        kaleng: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
-        daun: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
-        trash: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange,
-        string: Math.floor(Math.random() * (maxRange - minRange + 1)) + minRange
-    };
-
-    for (let key in rewards) user[key] += rewards[key];
-
-    let rewardMessage = `乂 *RPG - ADVENTURE*\n\n` +
-        `Stamina: ${user.stamina}/100\n` +
-        `EXP: ${rewards.exp}\n` +
-        `Money: $${rewards.money}\n\n` +
-        `Plastik: ${rewards.plastik}\n` +
-        `Rock: ${rewards.rock}\n` +
-        `Kardus: ${rewards.kardus}\n` +
-        `Kaleng: ${rewards.kaleng}\n` +
-        `Daun: ${rewards.daun}\n` +
-        `Trash: ${rewards.trash}\n` +
-        `String: ${rewards.string}`;
-
-    erlic.sendMessage(m.chat, { text: rewardMessage }, { quoted: m });
-}
-break;
-    
-case 'berburu':
-case 'hunt': {
-    const cooldownPremium = 10 * 60 * 1000;
-    const cooldownFree = 30 * 60 * 1000;
-
-    if (!global.db.users) global.db.users = {};
-
-    function inisialisasi(sender) {
-        if (!global.db.users[sender]) {
-            global.db.users[sender] = new Proxy({}, {
-                get(target, prop) {
-                    if (!(prop in target)) {
-                        if (['register','premium'].includes(prop)) target[prop] = false;
-                        else if (prop === 'stamina') target[prop] = 100;
-                        else target[prop] = 0;
-                    }
-                    return target[prop];
-                },
-                set(target, prop, value) {
-                    target[prop] = value;
-                    return true;
-                }
-            });
-        }
-        return global.db.users[sender];
-    }
-
-    const user = inisialisasi(m.sender);
-
-    if (!user.register) return erlic.sendMessage(m.chat, { text: 'User tidak ditemukan di database. Pastikan anda sudah terdaftar!' }, { quoted: m });
-    if (user.stamina < 30) return erlic.sendMessage(m.chat, { text: `Stamina kamu kurang dari 30. Gunakan command *${setting.prefix}heal*.` }, { quoted: m });
-
-    const requiredItems = ['sword','bow','armor'];
-    let missingItems = [];
-    let ownedItems = [];
-
-    requiredItems.forEach(item => {
-        if (!user[item] || user[item] <= 0) missingItems.push(item);
-        else ownedItems.push(`${item.charAt(0).toUpperCase() + item.slice(1)}: ${user[item]}`);
-    });
-
-    if (missingItems.length > 0) {
-        let missingItemsText = missingItems.map(item => {
-            if (item === 'sword') return '⚔️ Sword';
-            if (item === 'bow') return '🏹 Bow';
-            if (item === 'armor') return '🥼 Armor';
-        }).join('\n');
-        let ownedItemsText = ownedItems.length > 0 ? `\n\nKamu hanya memiliki:\n${ownedItems.join('\n')}` : '';
-        let teks = `Kamu kekurangan alat untuk berburu:\n${missingItemsText}\n\nSilahkan buat terlebih dahulu dengan command:\n${setting.prefix}create *item count*\nContoh:\n${setting.prefix}create bow 1` + ownedItemsText;
-        return erlic.sendMessage(m.chat, { text: teks }, { quoted: m });
-    }
-
-    const cooldown = user.premium ? cooldownPremium : cooldownFree;
-    if (Date.now() - (user.lastberburu || 0) < cooldown) {
-        const remainingTime = cooldown - (Date.now() - (user.lastberburu || 0));
-        return erlic.sendMessage(m.chat, { text: `Kamu sudah berburu, tunggu *${func.msToTime(remainingTime)}* lagi.` }, { quoted: m });
-    }
-
-    user.lastberburu = Date.now();
-    user.stamina -= 5;
-
-    ['Sword','Bow','Armor'].forEach(tool => {
-        const durKey = `durabilities${tool}`;
-        const itemKey = tool.toLowerCase();
-        if (user[durKey] > 0) {
-            user[durKey] -= 5;
-            if (user[durKey] <= 0) delete user[itemKey];
-        }
-    });
-
-    await erlic.sendMessage(m.chat, { text: '_Pemburuan dimulai..._' }, { quoted: m });
-
-    setTimeout(() => {
-        const animals = ['banteng','harimau','gajah','kambing','panda','buaya','kerbau','sapi','monyet','babi','babihutan','ayam'];
-        let randomResults = Array.from({ length: animals.length }, () => Math.floor(Math.random() * 10));
-        let rewards = randomResults.map(n => n * (user.premium ? 5 : 1));
-
-        animals.forEach((animal, idx) => {
-            user[animal] = (user[animal] || 0) + rewards[idx];
-        });
-
-        let hsl = `乂 *RPG - BERBURU*\n\nSisa stamina: ${user.stamina} / 100\nDurability:\n- Armor: ${user.durabilitiesArmor || 0}\n- Sword: ${user.durabilitiesSword || 0}\n- Bow: ${user.durabilitiesBow || 0}\n\nHasil berburu ${m.pushname}\n` +
-            `🐂 Banteng = ${rewards[0]}        🐃 Kerbau = ${rewards[6]}\n` +
-            `🐅 Harimau = ${rewards[1]}       🐮 Sapi = ${rewards[7]}\n` +
-            `🐘 Gajah = ${rewards[2]}         🐒 Monyet = ${rewards[8]}\n` +
-            `🐐 Kambing = ${rewards[3]}        🐗 Babi = ${rewards[9]}\n` +
-            `🐼 Panda = ${rewards[4]}         🐖 Babi Hutan = ${rewards[10]}\n` +
-            `🐊 Buaya = ${rewards[5]}         🐓 Ayam = ${rewards[11]}\n\n` +
-            `> Ketik: ${setting.prefix}kandang untuk melihat hasilnya.`;
-
-        erlic.sendMessage(
-            m.chat,
-            {
-                text: hsl,
-                contextInfo: {
-                    externalAdReply: {
-                        title: 'B E R B U R U',
-                        body: global.header,
-                        mediaType: 1,
-                        renderLargerThumbnail: true,
-                        thumbnailUrl: 'https://files.catbox.moe/tqqogh.jpg'
-                    }
-                }
-            },
-            { quoted: m }
-        );
-    }, 10000);
-}
-break;
-    
-case 'berkebun': {
-    
-    function padZero(num) {
-        return num < 10 ? '0' + num : num;
-    }
-    
-    function formatCooldown(ms) {
-        const hours = Math.floor(ms / 3600000);
-        const minutes = Math.floor((ms % 3600000) / 60000);
-        const seconds = Math.floor((ms % 60000) / 1000);
-        return `${padZero(hours)}:${padZero(minutes)}:${padZero(seconds)}`;
-    }
-
-    if (!global.db.users) global.db.users = {};
-    if (!global.db.users[m.sender]) global.db.users[m.sender] = {};
-
-    let sender = global.db.users[m.sender];
-
-    sender = new Proxy(sender, {
-        get(target, prop) {
-            if (!(prop in target)) target[prop] = 0;
-            return target[prop];
-        },
-        set(target, prop, value) {
-            target[prop] = value;
-            return true;
-        }
-    });
-
-    if (!sender.register) {
-        return erlic.sendMessage(m.chat, { text: 'User tidak ditemukan dalam database. Pastikan Anda sudah terdaftar!' }, { quoted: m });
-    }
-
-    const bibitList = [
-        { name: 'apel', count: sender.bibitapel },
-        { name: 'anggur', count: sender.bibitanggur },
-        { name: 'mangga', count: sender.bibitmangga },
-        { name: 'jeruk', count: sender.bibitjeruk },
-        { name: 'pisang', count: sender.bibitpisang },
-        { name: 'wortel', count: sender.bibitwortel },
-        { name: 'kentang', count: sender.bibitkentang },
-        { name: 'tomat', count: sender.bibittomat },
-        { name: 'kubis', count: sender.bibitkubis },
-        { name: 'terong', count: sender.bibitterong },
-        { name: 'labu', count: sender.bibitlabu }
-    ];
-
-    let kurangMessage = 'Bibit kamu tidak mencukupi untuk berkebun:\n';
-    let allSufficient = true;
-    for (let bibit of bibitList) {
-        if (bibit.count < 1) {
-            kurangMessage += `- Bibit ${bibit.name}: ${bibit.count}\n`;
-            allSufficient = false;
-        }
-    }
-
-    if (!allSufficient) {
-        return erlic.sendMessage(m.chat, {
-            text: `${kurangMessage}\n> Ketik ${setting.prefix}buybibit untuk membeli bibit.`,
-            contextInfo: { mentionedJid: [m.sender] }
-        }, { quoted: m });
-    }
-
-    const cooldown = 30 * 60 * 1000;
-    if (Date.now() - sender.lastberkebun < cooldown) {
-        return erlic.sendMessage(m.chat, {
-            text: `Kamu sudah berkebun, mohon tunggu *${formatCooldown(cooldown - (Date.now() - sender.lastberkebun))}* untuk bisa *berkebun* lagi.`,
-            contextInfo: { mentionedJid: [m.sender] }
-        }, { quoted: m });
-    }
-
-    const hadiahExp = Math.floor(Math.random() * 991) + 10;
-    const hasilBerkebun = {
-        apel: Math.floor(Math.random() * 501),
-        anggur: Math.floor(Math.random() * 501),
-        mangga: Math.floor(Math.random() * 501),
-        jeruk: Math.floor(Math.random() * 501),
-        pisang: Math.floor(Math.random() * 501),
-        wortel: Math.floor(Math.random() * 501),
-        kentang: Math.floor(Math.random() * 501),
-        tomat: Math.floor(Math.random() * 501),
-        kubis: Math.floor(Math.random() * 501),
-        terong: Math.floor(Math.random() * 501),
-        labu: Math.floor(Math.random() * 501)
-    };
-
-    sender.lastberkebun = Date.now();
-
-    sender.bibitapel -= 100;
-    sender.bibitanggur -= 100;
-    sender.bibitmangga -= 100;
-    sender.bibitjeruk -= 100;
-    sender.bibitpisang -= 100;
-    sender.bibitwortel -= 100;
-    sender.bibitkentang -= 100;
-    sender.bibittomat -= 100;
-    sender.bibitkubis -= 100;
-    sender.bibitterong -= 100;
-    sender.bibitlabu -= 100;
-
-    sender.apel += hasilBerkebun.apel;
-    sender.anggur += hasilBerkebun.anggur;
-    sender.mangga += hasilBerkebun.mangga;
-    sender.jeruk += hasilBerkebun.jeruk;
-    sender.pisang += hasilBerkebun.pisang;
-    sender.wortel += hasilBerkebun.wortel;
-    sender.kentang += hasilBerkebun.kentang;
-    sender.tomat += hasilBerkebun.tomat;
-    sender.kubis += hasilBerkebun.kubis;
-    sender.terong += hasilBerkebun.terong;
-    sender.labu += hasilBerkebun.labu;
-
-    sender.stamina -= 10;
-
-    return erlic.sendMessage(m.chat, {
-        text: `乂 *RPG BERKEBUN*\n\nSisa Stamina: ${sender.stamina} / 100\nExp: +${hadiahExp}\n\n🍎 Apel: +${hasilBerkebun.apel}\n🥭 Mangga: +${hasilBerkebun.mangga}\n🍊 Jeruk: +${hasilBerkebun.jeruk}\n🍌 Pisang: +${hasilBerkebun.pisang}\n🍇 Anggur: +${hasilBerkebun.anggur}\n\n🥕 Wortel: +${hasilBerkebun.wortel}\n🥔 Kentang: +${hasilBerkebun.kentang}\n🍅 Tomat: +${hasilBerkebun.tomat}\n🥬 Kubis: +${hasilBerkebun.kubis}\n🍆 Terong: +${hasilBerkebun.terong}\n🎃 Labu: +${hasilBerkebun.labu}\n\n> Ketik ${setting.prefix}gudang untuk melihat hasil panenmu.`,
-        contextInfo: {
-            externalAdReply: {
-                title: 'B E R K E B U N',
-                body: global.header,
-                thumbnailUrl: 'https://files.catbox.moe/daujyf.jpg',
-                sourceUrl: '',
-                mediaType: 1,
-                renderLargerThumbnail: true
-            }
-        }
-    }, { quoted: m });
-}
-break;
-        
+       
  case 'cekpanel': { const fs=require('fs'); const path=require('path'); const panelFile=path.join(__dirname,'./database/panel.json'); if(!fs.existsSync(panelFile)) return m.reply('Belum ada data panel.'); const rawData=fs.readFileSync(panelFile); const panelData=JSON.parse(rawData); const userPanels=panelData.filter(item=>item.jid===m.sender); if(userPanels.length<1) return m.reply('Your server is empty.'); function calculateExpireTime(expiredTimestamp){const now=Date.now();const diff=expiredTimestamp-now;const seconds=Math.floor((diff/1000)%60);const minutes=Math.floor((diff/(1000*60))%60);const hours=Math.floor((diff/(1000*60*60))%24);const days=Math.floor(diff/(1000*60*60*24)); return diff>0?`${days}D ${hours}H ${minutes}M ${seconds}S`:'Expired';} let caption='乂  *C H E C K - P A N E L*\n\n'; caption+=`◦  *Jid* : @${m.sender.replace(/@.+/,'')}\n`; caption+=`◦  *Total Server* : ${userPanels.length}\n`; caption+=`*Server* :\n`; caption+=userPanels.map((item,index)=>{const s=item.server; const ramDisplay=(Number(s.ram)===0)?'∞':`${s.ram}GB`; const expireTime=calculateExpireTime(new Date(s.expire).getTime()); return `${index+1}. ${s.username}\n- ID: ${s.id}\n- RAM: ${ramDisplay}\n- Expire: ${expireTime}`;}).join('\n\n'); erlic.sendMessage(m.chat,{text:caption,mentions:[m.sender]},{quoted:m}); } break;
         
 case 'kalender':
@@ -9713,110 +8467,6 @@ break
         
 case 'ddos': { if (!isCreator) return m.reply(mess.owner); const args = m.text.split(" "); if (args.length < 3) return m.reply("Use Methode: " + cmd + " <target> <time>\nExample: " + cmd + " example.my.id 60"); const url = args[1]; const time = args[2]; m.reply("Attack Website Are Being Processed...\n- *Target* : " + url + "\n- *Time Attack* : " + time); exec("node system/ddos.js " + url + " " + time, { 'maxBuffer': 1048576 }, (error, stdout, stderr) => { if (error) return m.reply("Error: " + error.message); if (stderr) return m.reply("Error: " + stderr); m.reply("Successfully DDOS\n\n- Target: " + url + "\n- Time: " + time); }); } break;
 
-case 'script': case 'sc': {
- const formatHarga = (harga) => {
-  if (harga >= 1_000_000_000) return (harga / 1_000_000_000).toFixed(1).replace(/\.0$/, '') + 'B';
-  if (harga >= 1_000_000) return (harga / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (harga >= 1_000) return (harga / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
-  return harga.toString();
-};
- let hargaNormal = 60000; 
- try {
- const data = fs.readFileSync('./database/hargasc.json', 'utf8'); 
- const hargaData = setting.hargasc
- if (hargaData && hargaData.harga) {
- hargaNormal = hargaData.harga;
- }
- } catch (err) {
- console.error('Gagal mengambil harga dari file hargasc.json:', err);
- }
- const hargaDiskon = hargaNormal - (hargaNormal * 0.20);
- var repoDATAWANumber = 'https://github.com/joo1alaricc/buyer/blob/main/buyer.json';
-var rawDATAWANumber = repoDATAWANumber
-  .replace("https://github", "https://raw.githubusercontent")
-  .replace("/blob/", "/");
-
-let buyerListText = '';
-
-try {
-    const axios = require('axios')
-  const res = await axios.get(rawDATAWANumber);
-  const buyerData = res.data;
-
-  if (Array.isArray(buyerData)) {
-    buyerListText = '\n\n*LIST PEMBELI SCRIPT:*\n';
-    buyerData.forEach((buyer, index) => {
-      const buyerName = buyer.name.charAt(0).toUpperCase() + buyer.name.slice(1);
-      buyerListText += `${index + 1}. ${buyerName} ➠ ${formatHarga(buyer.harga)}\n`;
-    });
-  }
-} catch (err) {
-  buyerListText = '\n\nGagal memuat daftar pembeli.';
-  console.error('Gagal fetch buyer.json:', err.message);
-}
-    const fs = require('fs')
-    const path = './database/menu.json';
-  const menu = JSON.parse(fs.readFileSync(path));
-    const pkg = require('./package.json');
-    const totalFittur = menu.reduce((total, obj) => total + Object.values(obj)[0].length, 0);
- let teks = `*SELL SCRIPT ${global.botname.toUpperCase()} BOT V${pkg.version}*
-
-- Normal price: ${formatHarga(hargaNormal)}
-- Discount price: ${formatHarga(hargaDiskon)}
-- Features: ${totalFittur}+
-- Type: Case
-
-*Key Features:*
-- Support Pairing
-- Size dibawah 5MB
-- Security access
-
-*Preview Features:*
-- System update automatically
-- Auto backup script
-- Downloader (tiktok, instagram, facebook, snackvideo, twitter, capcut, youtube dll)
-- Many useful tools
-- Tiktok Search
-- AI (Chat AI, Generate AI)
-- Remini
-- And more...
-
-*Requirements:*
-- NodeJS v18
-- FFMPEG
-- Min. 4GB RAM
-
-*Benefit:*
-- Free update
-- Request Features (additional cost)
-- Fixing Features (additional cost)
-- Free server 1 month 
-
-Jika anda berminat silahkan hubungi
-https://wa.me/639384364507 (Nathan)
-https://wa.me/6283840818197 (Dimas)${buyerListText}`;
- let nominal = hargaDiskon;
- let target = m.chat.includes('@g.us') ? m.sender.split('@')[0] : m.chat.split('@')[0];
- await erlic.relayMessage(m.chat, {
- requestPaymentMessage: {
- currencyCodeIso4217: 'IDR',
- amount1000: `${nominal}000`,
- requestFrom: m.sender,
- noteMessage: {
- extendedTextMessage: {
- text: teks,
- contextInfo: {
- externalAdReply: {
- showAdAttribution: false,
- }
- }
- }
- }
- }
- }, { quoted: m });
-}
-break;
-    
 case 'upsc': {
     if (!isDev) return m.reply(mess.devs)
     const quotedMessage = m.message?.extendedTextMessage?.contextInfo?.quotedMessage
