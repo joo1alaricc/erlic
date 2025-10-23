@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 exports.run = {
-  usage: ['saveplugin'],
+  usage: ['saveplugin','addplugin'],
   hidden: ['sp'], 
   use: 'reply code',
   category: 'owner',
