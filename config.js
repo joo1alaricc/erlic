@@ -4,7 +4,6 @@
    Note: Sistem akan update secara otomatis ke versi yang terbaru, jangan lupa untuk rutin membackup kode bot agar fitur di erlic.js bisa dipulihkan kembali. (Update meliputi: erlic.js, ./database/menu.json). Untuk info lebih lanjut, ikuti saluran erlic official: https://whatsapp.com/channel/0029VarSnzo2v1IjuQu2BC3v
 */
 
-
 /* setting informasi bot */
 // ganti nomor bot lu
 global.config = {
@@ -16,9 +15,9 @@ global.config = {
     browser: ['Windows', 'Chrome', '20.0.04']
 }
 // ganti nomor lu
-global.owner = ['6283878301449','6283840818197']
+global.owner = ['6283878301449']
 // ganti nama lu
-global.ownername = ['jovian','dimas']
+global.ownername = ['jovian']
 // website owner
 global.website = ['https://instagram.com/arxhillie','https://instagram.com/arxhillie']
 // fake lokasi owner
@@ -50,7 +49,6 @@ global.sound = ['https://files.catbox.moe/g1pp69.mpeg', 'https://files.catbox.mo
 // thumbnail di beberapa fitur
 global.thumb = 'https://files.catbox.moe/gu0oe4.jpeg' 
 
-
 /* setting system bot */
 // font untuk di menu (1-39)
 global.font = 38
@@ -72,12 +70,12 @@ global.qris = 'https://files.catbox.moe/1z91ic.jpeg'
 // sesuai nama qris di global.qris
 global.payment = 'QRIS'
 // sesuai nomor e-money lu
-global.ovo = '' 
+global.ovo = 6282245682288
 global.dana = ''
 global.shopeepay = ''
-global.gopay = ''
+global.gopay = 6282245682288
 global.seabank = ''
-global.pulsa = ''
+global.pulsa = 6282245682288
 global.pulsa2 = ''
 
 /* setting cpanel */
@@ -109,6 +107,5 @@ errorstc: 'Failed to create sticker.',
 error: 'Sorry an error occurred!',
 errorUrl: 'URL is invalid!'
 }
-
 
 require('./system/functions.js').reloadFile(__filename);
