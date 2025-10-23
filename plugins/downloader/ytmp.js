@@ -5,85 +5,68 @@ exports.run = {
   use: 'link YouTube',
   category: 'downloader',
   async: async (m, { erlic, text, command, setting }) => {
-    if (!text) return m.reply(`Contoh: ${setting.prefix}${command} https://youtu.be/HWjCStB6k4o`)
-    erlic.sendReact(m.chat, '🕒', m.key)
+    if (!text) return m.reply(`Contoh: ${setting.prefix}${command} https://youtu.be/V4L882gVqTg`)
+    await erlic.sendMessage(m.chat, { react: { text: "🕒", key: m.key } })
 
     try {
-      let apiUrl
-      if (command === 'ytmp3') {
-        apiUrl = `https://api.vreden.my.id/api/v1/download/youtube/audio?url=${encodeURIComponent(text)}&quality=128`
-      } else {
-        apiUrl = `https://api.vreden.my.id/api/v1/download/youtube/video?url=${encodeURIComponent(text)}&quality=360`
-      }
+      const format = command === 'ytmp3' ? 'mp3' : 'mp4'
+      const apiUrl = `https://api.nekolabs.my.id/downloader/youtube/v1?url=${encodeURIComponent(text)}&format=${format}`
 
-      const res = await fetch(apiUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-      })
+      const res = await fetch(apiUrl)
       const json = await res.json()
 
-      if (!json.status || !json.result?.metadata || !json.result?.download?.url)
-        return m.reply('❌ Gagal mendapatkan data. Pastikan link valid.')
+      if (!json.success || !json.result?.downloadUrl)
+        return m.reply('Gagal mendapatkan data. Pastikan link valid atau coba format lain.')
 
-      const meta = json.result.metadata
-      const dl = json.result.download.url
-      const img = meta.image || meta.thumbnail
-      const cap = `乂 *Y O U T U B E - ${command.toUpperCase()}*\n
-∘ *Judul* : ${meta.title}
-∘ *Durasi* : ${meta.duration.timestamp || '-'}
-∘ *Kualitas* : ${json.result.download.quality || '-'}
-∘ *Views* : ${meta.views?.toLocaleString() || '-'}
-∘ *Upload* : ${meta.ago || '-'}
-∘ *Channel* : ${meta.author.name || '-'}
-∘ *URL* : ${meta.url}
-\n${meta.description?.substring(0, 150) || ''}\n\n_${command === 'ytmp3' ? 'Please wait, the audio file is being sent...':''}_`
+      const r = json.result
+      const thumb = r.cover
+      const caption = `乂 *Y O U T U B E - ${format.toUpperCase()}*\n
+∘ *Title* : ${r.title}
+∘ *Duration* : ${r.duration || '-'}
+∘ *Quality* : ${r.quality || '-'}
+∘ *Format* : ${r.format?.toUpperCase() || '-'}
+\n${command === 'ytmp3' ? '_Audio file is being sent..._' : ''}`
 
       if (command === 'ytmp3') {
-        let anjay = await erlic.sendMessage(m.chat, {
-          image: { url: img },
-          caption: cap,
+        // kirim thumbnail preview dulu
+        const preview = await erlic.sendMessage(m.chat, {
+          image: { url: thumb },
+          caption,
           contextInfo: {
             externalAdReply: {
-              title: meta.title,
-              body: meta.author.name || '-',
-              thumbnailUrl: img,
-              sourceUrl: meta.url,
+              title: r.title,
+              body: 'YouTube Downloader',
+              thumbnailUrl: thumb,
+              sourceUrl: text,
               mediaType: 1,
               renderLargerThumbnail: true
             }
           }
         }, { quoted: m })
 
+        // lalu kirim audio
         await erlic.sendMessage(m.chat, {
-          audio: { url: dl },
+          audio: { url: r.downloadUrl },
           mimetype: 'audio/mpeg',
+          fileName: `${r.title}.mp3`,
           ptt: false
-        }, { quoted: anjay })
+        }, { quoted: preview })
 
-      } else if (command === 'ytmp4') {
+      } else {
+        // langsung kirim video tanpa preview thumbnail
         await erlic.sendMessage(m.chat, {
-          video: { url: dl },
-          caption: cap,
-          gifPlayback: false,
-          contextInfo: {
-            externalAdReply: {
-              title: meta.title,
-              body: meta.author.name || '-',
-              thumbnailUrl: img,
-              sourceUrl: meta.url,
-              mediaType: 1,
-              renderLargerThumbnail: true
-            }
-          }
+          video: { url: r.downloadUrl },
+          caption: `乂 *Y O U T U B E - MP4*\n
+∘ *Judul* : ${r.title}
+∘ *Durasi* : ${r.duration || '-'}
+∘ *Kualitas* : ${r.quality || '-'}
+∘ *Format* : ${r.format?.toUpperCase() || '-'}`
         }, { quoted: m })
       }
 
-    } catch (e) {
-      console.error(e)
-      if (e.type === 'invalid-json') {
-        m.reply('⚠️ Server API tidak merespon JSON valid, coba lagi nanti.')
-      } else {
-        m.reply('❌ Terjadi kesalahan saat mengambil data.')
-      }
+    } catch (err) {
+      console.error(err)
+      m.reply('Terjadi kesalahan saat mengambil data. Coba lagi nanti.')
     }
   },
   limit: 5,
