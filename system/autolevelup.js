@@ -9,9 +9,22 @@ const addCooldown = (userId) => {
     setTimeout(() => xpCooldownDB.delete(userId), 1000 * 60); 
 };
 
-module.exports = async function autolevelup(erlic, m, setting, groups) {
+module.exports = async function autolevelup(erlic, m, setting) {
     if (!global.db?.users) return;
+    const groups = global.db.groups[m.chat]
     const user = global.db.users[m.sender];
+    const prefi = Array.isArray(global.db.setting?.prefix)
+  ? global.db.setting.prefix
+  : [global.db.setting?.prefix || '.', '!'];
+const prefixRegex = new RegExp(
+  `^(${prefi.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`
+);
+    const from = m.chat
+    const budy = (typeof m.text === 'string') ? m.text : '';
+    const prefik = setting.prefix
+    const isCmd = budy.startsWith(prefik);
+    const isGroup = from.endsWith("@g.us");
+        const isPrivate = from.endsWith("@s.whatsapp.net");
     if (
         !user ||
         !user.register ||
@@ -21,8 +34,8 @@ module.exports = async function autolevelup(erlic, m, setting, groups) {
         m.fromMe
     ) return;
 
-    if (!m.isPc && m.isGc && groups?.mute) return;
-    if (m.isPrefix) return;
+    if (!isPrivate && isGroup && groups?.mute) return;
+    if (isCmd) return;
 
     const currentLevel = user.level;
     const gainedXp = Math.floor(Math.random() * 16) + 20; 
@@ -36,7 +49,7 @@ module.exports = async function autolevelup(erlic, m, setting, groups) {
     const newLevel = user.level;
     const username = m.pushName || 'Player';
 
-    const text = `Selamat 🥳, anda telah naik level!\n\n*Level Up : ${currentLevel} → ${newLevel}*\n_semakin sering berinteraksi dengan bot semakin tinggi level kamu_`;
+    const text = `Selamat 🥳, anda telah naik level!\n\n*Level Up : ${currentLevel} ➪ ${newLevel}*\n_semakin sering berinteraksi dengan bot semakin tinggi level kamu_`;
 
     try {
         let backgroundUrl = setting.cover;
