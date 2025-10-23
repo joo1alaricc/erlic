@@ -8,7 +8,7 @@
 /* setting informasi bot */
 // ganti nomor bot lu
 global.config = {
-    botnumber: '6283878301449',
+    botnumber: '6287748800395',
     pairing: true,
     session: 'session',
     online: true,
@@ -16,7 +16,7 @@ global.config = {
     browser: ['Windows', 'Chrome', '20.0.04']
 }
 // ganti nomor lu
-global.owner = ['639384364507','6283840818197']
+global.owner = ['6283878301449','6283840818197']
 // ganti nama lu
 global.ownername = ['jovian','dimas']
 // website owner
@@ -42,7 +42,7 @@ global.link = ''
 // watermark di beberapa fitur
 global.wm = 'Powered by ' + global.botname
 // id saluran lu
-global.idSaluran = '120363327728368573@newsletter' 
+global.idSaluran = '120363420653488907@newsletter' 
 // id grup lu
 global.idgc = '120363385221000216@g.us'
 // sound di menu, bisa 1 atau lebih
@@ -68,9 +68,9 @@ global.gconly = true
 
 /* setting payment */
 // url qris lu
-global.qris = 'https://files.catbox.moe/emehtl.jpeg' 
+global.qris = 'https://files.catbox.moe/1z91ic.jpeg' 
 // sesuai nama qris di global.qris
-global.payment = ''
+global.payment = 'QRIS'
 // sesuai nomor e-money lu
 global.ovo = '' 
 global.dana = ''
