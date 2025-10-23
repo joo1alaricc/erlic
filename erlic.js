@@ -4783,34 +4783,7 @@ case 'delfitur': {
 }
 break
         
-case 'listfitur': case 'totalfitur': {
-  try {
-    const fs = require('fs');
-    const dbPath = './database/menu.json';
-    const menu = JSON.parse(fs.readFileSync(dbPath));
-    if (!menu.length) return m.reply('Tidak ada fitur yang terdaftar.');
-    const sortedMenu = menu.sort((a, b) => {
-      const aKey = Object.keys(a)[0];
-      const bKey = Object.keys(b)[0];
-      return aKey.localeCompare(bKey);
-    });
-    let totalKategori = sortedMenu.length;
-    let totalFitur = 0;
-    let msg = '乂  *F E A T U R E - L I S T*\n\n';
-    sortedMenu.forEach(obj => {
-      const kategori = Object.keys(obj)[0];
-      const fiturList = obj[kategori];
-      totalFitur += fiturList.length;
-      msg += `◦ ${capital(kategori)}: ${fiturList.length}\n`;
-    });
-    msg += `\n*Total Kategori : ${totalKategori}*\n*Total Feature : ${totalFitur} Commands*`;
-    m.reply(msg);
-  } catch (e) {
-    console.error(e);
-    m.reply(mess.error);
-  }
-}
-break   
+case 'totalfitur': case 'listfitur':{ try { const fs=require('fs');const path=require('path');function walk(dir){let results=[];const list=fs.readdirSync(dir);list.forEach(file=>{const filePath=path.join(dir,file);const stat=fs.statSync(filePath);if(stat&&stat.isDirectory())results=results.concat(walk(filePath));else if(filePath.endsWith('.js'))results.push(filePath);});return results;}const pluginDir=path.resolve(__dirname,'./plugins');const files=walk(pluginDir);const categoriesMap={};const dbPath='./database/menu.json';let menuData=[];if(fs.existsSync(dbPath)){try{menuData=JSON.parse(fs.readFileSync(dbPath));for(let obj of menuData){const kategori=Object.keys(obj)[0];const fiturList=obj[kategori];if(!categoriesMap[kategori])categoriesMap[kategori]=[];categoriesMap[kategori].push(...fiturList);}}catch{}}for(let file of files){if(file.includes(`${path.sep}event${path.sep}`))continue;delete require.cache[require.resolve(file)];const plug=require(file);const data=plug.run||plug;if(!data||!data.usage||!data.category)continue;let{usage,category}=data;category=category.toLowerCase();if(!categoriesMap[category])categoriesMap[category]=[];if(typeof usage==='string')usage=[usage];for(let cmd of usage){if(!categoriesMap[category].includes(cmd))categoriesMap[category].push(cmd);}}const kategoriList=Object.keys(categoriesMap);if(!kategoriList.length)return m.reply('Tidak ada fitur yang terdeteksi.');let totalFitur=0;let msg='乂  *F E A T U R E - L I S T*\n\n';kategoriList.sort().forEach(kategori=>{const fiturList=[...new Set(categoriesMap[kategori])];totalFitur+=fiturList.length;msg+=`◦ ${kategori.charAt(0).toUpperCase()+kategori.slice(1)}: ${fiturList.length}\n`;});msg+=`\n*Total Kategori : ${kategoriList.length}*\n*Total Feature : ${totalFitur} Commands*`;m.reply(msg);}catch(e){console.error(e);m.reply('Terjadi kesalahan saat membaca fitur.');}}break;   
         
 case 'gempa': {
 await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
@@ -6868,9 +6841,7 @@ case 'gpt3': {
   }
   break;
 }
-        
-case 'backupsc': { if (!isCreator) return m.reply(mess.owner); await erlic.sendMessage(m.chat, { react: { text: "🕒", key: m.key } }); const { execSync } = require("child_process"); const fs = require("fs"); const ls = (await execSync("ls")).toString().split("\n").filter(pe => pe !== "node_modules" && pe !== "session" && pe !== "tmp" && pe !== "package-lock.json" && pe !== ""); const now = new Date().toISOString().replace(/:/g, "-"), zipName = `backup_${now}.zip`; await execSync(`zip -r ${zipName} ${ls.join(" ")}`); const fileSize = fs.statSync(`./${zipName}`).size, sizeFormatted = fileSize < 1024 * 1024 ? `${(fileSize / 1024).toFixed(2)} KB` : `${(fileSize / (1024 * 1024)).toFixed(2)} MB`; const combined = [...(global.owner || [])], uniqueJids = [...new Set(combined.map(num => num.replace(/[^0-9]/g, '') + "@s.whatsapp.net"))]; for (let jid of uniqueJids) await erlic.sendMessage(m.sender, { document: fs.readFileSync(`./${zipName}`), caption: `Berikut adalah file backup kode bot ${global.botname}.\nSize: ${sizeFormatted}`, mimetype: "application/zip", fileName: zipName }, { quoted: m }); await execSync(`rm -rf ${zipName}`); if (m.isGroup) await erlic.sendMessage(m.chat, { text: "File backup berhasil dikirim ke owner." }, { quoted: m }); } break;
-        
+            
 case 'systeminfo': case 'infosistem': { const osu = require('node-os-utils'); const { performance } = require('perf_hooks'); const { totalmem, freemem } = require('os'); const createBar = (percentage, length = 10) => { const filled = Math.round((percentage / 100) * length); return `[${'■'.repeat(filled)}${'□'.repeat(length - filled)}] ${percentage}%`; }; const getStorageInfo = async () => { const drive = osu.drive; const { totalGb, usedGb } = await drive.info(); return { total: totalGb, used: usedGb }; }; let start = performance.now(); let { key } = await erlic.sendMessage(m.chat, { text: 'TESTING' }, { quoted: m, ephemeralExpiration: m.expiration }); let end = performance.now(); let ping = Math.round(end - start); const totalMemory = totalmem(); const freeMemory = freemem(); const usedMemory = totalMemory - freeMemory; const memoryUsage = Math.round((usedMemory / totalMemory) * 100); const storage = await getStorageInfo(); const storageUsage = Math.round((storage.used / storage.total) * 100); const caption = `PING: ${ping} ms\n\nRAM:\n${createBar(memoryUsage)}\n\nSTORAGE:\n${createBar(storageUsage)}\n\nTotal Storage: ${storage.total} GB\nUsed Storage: ${storage.used} GB`.trim(); await erlic.sendMessage(m.chat, { text: caption, edit: key }, { quoted: m, ephemeralExpiration: m.expiration }); } break;
         
 case 'server': {
