@@ -60,8 +60,12 @@ const botNumber = await erlic.decodeJid(erlic.user.id)
 const senderNumber = sender.split('@')[0]
 const isCreator = (m.sender && ([botNumber, ...global.owner, ...global.prems, ...global.developer, ...setting.owner].map(v => v.replace(/[^0-9]/g, '') + '@s.whatsapp.net').includes(m.sender) || botNumber.includes(m.sender.replace(/[^0-9]/g, '')))) || false;
 const dimasathan = global.owner.includes(m.sender.split('@')[0]);
-const prefi = global.db.settings?.prefix || ['.', '!']; // default jika tidak ada
-const prefixRegex = new RegExp(`^(${prefi.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`);
+const prefi = Array.isArray(global.db.setting?.prefix)
+  ? global.db.setting.prefix
+  : [global.db.setting?.prefix || '.', '!'];
+const prefixRegex = new RegExp(
+  `^(${prefi.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`
+);
 const pripek = setting.prefix
 const matchedPrefix = budy.match(prefixRegex);
 const prefix = isCreator ? (matchedPrefix ? matchedPrefix[0] : '' ) : (matchedPrefix ? matchedPrefix[0] : pripek ) || pripek || '.';
@@ -579,7 +583,7 @@ if (setting?.antispam !== false &&
 }
 
 if (setting.gconly) {
-const metadata = await getGroupMetadata(global.idgc)
+const metadata = await erlic.groupMetadata(global.idgc)
 if (
 !isCreator &&
 !isPrem(m.sender) &&
@@ -1203,7 +1207,7 @@ case 'me': {
     banned: user.expired?.banned,
     premium: user.expired?.premium
   };
-  const date = user.registeredAt || '-';
+  const date = user.date || '-';
   const about = (await erlic.fetchStatus(m.sender).catch(_ => {}) || {}).status || '-';
   const formattedBalance = '$' + new Intl.NumberFormat('id-ID').format(balance || 0);
   const expNeeded = 10 * Math.pow(level, 2) + 50 * level + 100;
@@ -1298,7 +1302,7 @@ case 'profil': {
     banned: user.expired?.banned,
     premium: user.expired?.premium
   };
-  const date = user.registeredAt || '-';
+  const date = user.date || '-';
   const about = (await erlic.fetchStatus(target).catch(_ => {}) || {}).status || '-';
   const formattedBalance = '$' + new Intl.NumberFormat('id-ID').format(balance || 0);
   const expNeeded = 10 * Math.pow(level, 2) + 50 * level + 100;
@@ -6563,9 +6567,7 @@ if (!yStr[fontNum]) return m.reply(`Font tidak tersedia. Gunakan angka 1 - ${tot
 }
         
 case'alkitab':{if(!text)return m.reply(func.example(cmd,'nkjv Matius 1'));try{await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}});const[ver,buku,bab]=text.split` `;if(!ver||!buku||!bab)return m.reply(func.example(cmd,'nkjv Matius 1'));const{default:axios}=require('axios'),res=await axios.get(`https://api.fasturl.link/religious/alkitab?version=${ver}&book=${buku}&chapter=${bab}`),data=res.data;if(data.status!==200||!data.result?.verses)return m.reply('Gagal mengambil data.');const ayat=data.result.verses.map(v=>`${v.verse}. ${v.content}\n`).join`\n`;let teks=`乂 *A L K I T A B*\n\n- *Kitab* : ${data.result.book}\n- *Pasal* : ${data.result.chapter}\n- *Versi* : ${data.result.version.toUpperCase()}\n\n${ayat}`;erlic.sendMessage(m.chat,{text:teks},{quoted:m})}catch(e){console.error(e),m.reply(mess.error)}}break;
-        
-case 'play':{if(!text)return m.reply(func.example(cmd,'homesick'));try{await erlic.sendMessage(m.chat,{react:{text:'🕒',key:m.key}});const yts=require('yt-search'),axios=require('axios'),{createCanvas,loadImage}=require('canvas');let search=await yts(text);if(!search?.videos?.length)return m.reply('Video tidak ditemukan');let url=search.videos[0].url,res=await axios.get(`https://izumiiiiiiii.dpdns.org/downloader/youtube?url=${encodeURIComponent(url)}&format=mp3`),data=res.data;if(!data.status||!data.result?.download)return m.reply('Gagal mengambil audio');let info=data.result,meta={title:info.title,author:{name:info.author.channelTitle},duration:{timestamp:info.metadata.duration},views:info.metadata.view,ago:info.metadata.ago,description:info.description,url:info.url},dl=info.download,img=info.thumbnail,canvas=createCanvas(800,400),ctx=canvas.getContext('2d'),thumb=await loadImage(img);ctx.fillStyle=ctx.createLinearGradient(0,0,0,400);ctx.fillStyle.addColorStop(0,'#121212');ctx.fillStyle.addColorStop(1,'#1f1f1f');ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(thumb,40,80,240,240);ctx.fillStyle='#fff';ctx.font='bold 28px Sans';let words=meta.title.split(' '),line='',y=150;for(let w of words){if(ctx.measureText(line+w).width>400){ctx.fillText(line.trim(),310,y);line='';y+=32}line+=w+' '}ctx.fillText(line.trim(),310,y);ctx.fillStyle='#b3b3b3';ctx.font='22px Sans';ctx.fillText(meta.author.name||'-',310,y+40);ctx.fillText(meta.duration.timestamp||'-',310,y+70);ctx.fillStyle='#555';ctx.fillRect(310,y+100,400,6);ctx.fillStyle='#1db954';ctx.fillRect(310,y+100,180,6);let buffer=canvas.toBuffer('image/png'),cap=`乂 *Y O U T U B E - P L A Y*\n\n∘ Title : ${meta.title}\n∘ Duration : ${meta.duration.timestamp||'-'}\n∘ Views : ${meta.views||'-'}\n∘ Upload : ${meta.ago||'-'}\n∘ Author : ${meta.author.name||'-'}\n∘ URL : ${meta.url}\n∘ Description: ${meta.description||'-'}\n\nPlease wait, the audio file is being sent...`,msg=await erlic.sendMessage(m.chat,{image:buffer,caption:cap,contextInfo:{externalAdReply:{title:meta.title,body:meta.author.name||'-',thumbnailUrl:img,sourceUrl:meta.url,mediaType:1,renderLargerThumbnail:true,showAdAttribution:false}}},{quoted:m});await erlic.sendMessage(m.chat,{audio:{url:dl},mimetype:'audio/mpeg',ptt:false},{quoted:msg})}catch(e){console.error(e);m.reply(mess.error)}}break;   
-        
+            
 case 'hidetag': case 'ht': case 'h': {
  if (!m.isGroup) return m.reply(mess.group);
  if (!isCreator && !isAdmins) return m.reply(mess.admin);
@@ -7531,78 +7533,7 @@ case 'snackvideo': {
   }
 }
 break;
-        
-case 'ytmp3':
-case 'ytmp4': {
-  const axios = require('axios')
-  if (!text) return m.reply(func.example(cmd, 'https://youtu.be/xxxxxxx'))
-  if (!/youtu\.?be/i.test(text)) return m.reply(mess.errorUrl)
-
-  await erlic.sendMessage(m.chat, { react: { text: '🕒', key: m.key } })
-
-  const isAudio = command === 'ytmp3'
-  const cleanUrl = text.split('&')[0] // Hapus parameter tambahan
-  const encodedUrl = encodeURIComponent(cleanUrl)
-
-  let apiUrl = isAudio
-    ? `https://api.fasturl.link/youtube/audio?query=${encodedUrl}&mode=url`
-    : `https://api.fasturl.link/youtube/video?query=${encodedUrl}&resolution=720&mode=url`
-
-  // Ambil data dari API
-  const response = await axios.get(apiUrl).catch(() => null)
-  const data = response?.data
-
-  // Cek apakah respons valid
-  if (!data || data.status !== 200 || !data.result) {
-    await m.reply('❌ Gagal mendapatkan data dari server.')
-    break
-  }
-
-  const r = data.result
-  const title = r.title || 'Unknown Title'
-  const duration = r.metadata?.duration || '00:00:00'
-  const size = r.sizeMb ? `${r.sizeMb} MB` : '-'
-  const quality = r.quality || 'Unknown'
-  const downloadUrl = r.downloadUrl?.trim()
-
-  if (!downloadUrl) {
-    await m.reply('❌ Tautan unduhan tidak tersedia.')
-    break
-  }
-
-  if (isAudio) {
-    const caption = `乂 *YOUTUBE DOWNLOADER MP3*\n\n` +
-      `◦ *Title* : ${title}\n` +
-      `◦ *Durasi* : ${duration}\n` +
-      `◦ *Kualitas* : ${quality}\n` +
-      `◦ *Format* : MP3\n` +
-      `◦ *Ukuran* : ${size}\n\n_Sedang mengirim..._`
-
-    const loading = await m.reply(caption)
-    await erlic.sendMessage(m.chat, {
-      audio: { url: downloadUrl },
-      mimetype: 'audio/mpeg'
-    }, { quoted: loading })
-
-  } else {
-    const caption = `乂 *YOUTUBE DOWNLOADER MP4*\n\n` +
-      `◦ *Title* : ${title}\n` +
-      `◦ *Durasi* : ${duration}\n` +
-      `◦ *Resolusi* : ${quality}\n` +
-      `◦ *Format* : MP4\n` +
-      `◦ *Ukuran* : ${size}`
-
-    await erlic.sendMessage(m.chat, {
-      video: { url: downloadUrl },
-      caption: caption,
-      mimetype: 'video/mp4'
-    }, { quoted: m })
-  }
-
-  await erlic.sendMessage(m.chat, { react: { text: '✅', key: m.key } })
-  break
-}
-        
+            
 case 'instagram':
 case 'ig': {
   if (!text) return m.reply(func.example(cmd, 'https://www.instagram.com/reel/C_Phn6NSIfQ/'))
