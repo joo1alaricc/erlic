@@ -55,122 +55,6 @@
       "lastadventure": 1756427892208,
       "lastTrade": 1758443730009
     },
-    "6283878301449@s.whatsapp.net": {
-      "jid": "6283878301449@s.whatsapp.net",
-      "register": true,
-      "name": "erlic",
-      "gender": "Laki-laki",
-      "age": 18,
-      "date": "2 Agustus 2025",
-      "limit": 9951,
-      "balance": 67400,
-      "afk": 0,
-      "alasan": "",
-      "afkObj": {
-        "key": {
-          "remoteJid": "120363420713587946@g.us",
-          "fromMe": false,
-          "id": "AC8A9933637D761A2CB058B78F4A192E",
-          "participant": "6283878301449@s.whatsapp.net"
-        },
-        "message": {
-          "conversation": ".afk",
-          "messageContextInfo": {
-            "messageSecret": "bzVXp10PgFeVPUN+hz4aCbr1dAom5bY72MGx0owVUpU="
-          }
-        }
-      },
-      "premium": true,
-      "jadibot": false,
-      "banned": false,
-      "warning": 0,
-      "pasangan": {
-        "id": "",
-        "time": 0
-      },
-      "expired": {
-        "user": 1754682913947,
-        "premium": 2618105413427,
-        "jadibot": 0,
-        "banned": 0
-      },
-      "lastunreg": 1754108312574,
-      "exp": 22703,
-      "level": 1000,
-      "role": "Mythical Immortal",
-      "registeredAt": "2 Agustus 2025",
-      "lastadventure": 1758440889494,
-      "stamina": 44,
-      "money": 1000002342018,
-      "plastik": 0,
-      "rock": 3293,
-      "kardus": 0,
-      "kaleng": 0,
-      "daun": 0,
-      "trash": 0,
-      "string": 5045,
-      "kayu": 625,
-      "sword": 1,
-      "durabilitiesSword": 75,
-      "bow": 1,
-      "durabilitiesBow": 75,
-      "iron": 940,
-      "armor": 1,
-      "durabilitiesArmor": 75,
-      "lastberburu": 1758441430892,
-      "banteng": 75,
-      "harimau": 55,
-      "gajah": 110,
-      "kambing": 45,
-      "panda": 55,
-      "buaya": 70,
-      "kerbau": 100,
-      "sapi": 85,
-      "monyet": 40,
-      "babi": 80,
-      "babihutan": 120,
-      "ayam": 25,
-      "lastBansos": 1758443480857,
-      "lastberkebun": 1758443930906,
-      "bibitapel": null,
-      "bibitanggur": null,
-      "bibitpisang": null,
-      "bibitmangga": null,
-      "bibitjeruk": null,
-      "bibitwortel": null,
-      "bibitkentang": null,
-      "bibittomat": null,
-      "bibitkubis": null,
-      "bibitterong": null,
-      "bibitlabu": null,
-      "apel": null,
-      "anggur": null,
-      "mangga": null,
-      "jeruk": null,
-      "pisang": null,
-      "wortel": null,
-      "kentang": null,
-      "tomat": null,
-      "kubis": null,
-      "terong": null,
-      "labu": null,
-      "lastadventure2": 1758444244703,
-      "meteorit": 3505,
-      "crystal": 595,
-      "metal": 145,
-      "stardust": 2158,
-      "alien_artifact": 4280,
-      "moon_rock": 4607,
-      "unknown_substance": 3568,
-      "lastadventure3": 1758444964574,
-      "magnetit": 4,
-      "hematit": 3,
-      "dolomit": 4,
-      "platinum": 3,
-      "jamur": 4,
-      "batu": 0,
-      "Bawang": 20
-    },
     "6287834560596@s.whatsapp.net": {
       "jid": "6287834560596@s.whatsapp.net",
       "register": false,
@@ -207,7 +91,7 @@
       "warning": 0,
       "expired": {
         "user": 1754705407617,
-        "premium": 2620129894743,
+        "premium": 2625004419867,
         "banned": 0
       },
       "lastunreg": 0,
@@ -382,7 +266,25 @@
     "11970560446522@lid": {
       "limit": 15,
       "balance": 0,
-      "role": "Bronze V"
+      "role": "Bronze V",
+      "afk": 0,
+      "alasan": "",
+      "afkObj": {
+        "key": {
+          "remoteJid": "120363402799136116@g.us",
+          "fromMe": false,
+          "id": "AC010476F8CA36AA530CB7EE20FC3F0B",
+          "participant": "11970560446522@lid",
+          "participantAlt": "6283878301449@s.whatsapp.net",
+          "addressingMode": "lid"
+        },
+        "message": {
+          "conversation": ".afk aja",
+          "messageContextInfo": {
+            "messageSecret": "41j4r7UeEIt0Rg87DEieqkdDQntoYiYioew4bpAKzXY="
+          }
+        }
+      }
     },
     "11970560446522@s.whatsapp.net": {
       "limit": 15,
@@ -1967,6 +1869,116 @@
       "exp": 0,
       "level": 0,
       "role": "Bronze V"
+    },
+    "6287748800395@s.whatsapp.net": {
+      "jid": "6287748800395@s.whatsapp.net",
+      "register": false,
+      "name": "-",
+      "gender": "",
+      "age": 0,
+      "date": "20 Oktober 2025",
+      "limit": 15,
+      "balance": 10000,
+      "premium": false,
+      "banned": false,
+      "warning": 0,
+      "expired": {
+        "user": 1761580540516,
+        "premium": 0,
+        "banned": 0
+      },
+      "lastunreg": 0,
+      "exp": 0,
+      "level": 0,
+      "role": "Bronze V"
+    },
+    "6281526009164@s.whatsapp.net": {
+      "jid": "6281526009164@s.whatsapp.net",
+      "register": false,
+      "name": "a",
+      "gender": "",
+      "age": 0,
+      "date": "21 Oktober 2025",
+      "limit": 15,
+      "balance": 10000,
+      "premium": false,
+      "banned": false,
+      "warning": 0,
+      "expired": {
+        "user": 1761612947747,
+        "premium": 0,
+        "banned": 0
+      },
+      "lastunreg": 0,
+      "exp": 0,
+      "level": 0,
+      "role": "Bronze V"
+    },
+    "6287748800409@s.whatsapp.net": {
+      "jid": "6287748800409@s.whatsapp.net",
+      "register": true,
+      "name": "neo",
+      "gender": "Laki-laki",
+      "age": 18,
+      "date": "22 Oktober 2025",
+      "limit": 65,
+      "balance": 10000,
+      "premium": false,
+      "banned": false,
+      "warning": 0,
+      "expired": {
+        "user": 1761711105057,
+        "premium": 0,
+        "banned": 0
+      },
+      "lastunreg": 0,
+      "exp": 66,
+      "level": 0,
+      "role": "Bronze V"
+    },
+    "6285721701329@s.whatsapp.net": {
+      "jid": "6285721701329@s.whatsapp.net",
+      "register": false,
+      "name": "sibuk",
+      "gender": "",
+      "age": 0,
+      "date": "22 Oktober 2025",
+      "limit": 15,
+      "balance": 10000,
+      "premium": false,
+      "banned": false,
+      "warning": 0,
+      "expired": {
+        "user": 1761739505029,
+        "premium": 0,
+        "banned": 0
+      },
+      "lastunreg": 0,
+      "exp": 0,
+      "level": 0,
+      "role": "Bronze V"
+    },
+    "6283878301449@s.whatsapp.net": {
+      "jid": "6283878301449@s.whatsapp.net",
+      "register": false,
+      "name": "akusi yes",
+      "gender": "",
+      "age": 0,
+      "date": "23 Oktober 2025",
+      "limit": 15,
+      "balance": 10000,
+      "premium": true,
+      "banned": false,
+      "warning": 0,
+      "expired": {
+        "user": 1761825713551,
+        "premium": 2625220932038,
+        "banned": 0
+      },
+      "lastunreg": 0,
+      "exp": 0,
+      "level": 0,
+      "role": "Bronze V"
     }
   },
   "groups": {
@@ -2103,11 +2115,11 @@
     "lastBackup": 0,
     "blockcmd": [],
     "autobio": false,
-    "autoread": false,
+    "autoread": true,
     "antispam": false,
     "autorecord": false,
     "autotyping": true,
-    "gconly": false,
+    "gconly": true,
     "online": false,
     "delayJpm": 5,
     "cooldown": 2,
@@ -2126,6 +2138,7 @@
       "max": 3000
     },
     "anticall": true,
-    "timer": 1800000
+    "timer": 1800000,
+    "autolevelup": true
   }
 }
